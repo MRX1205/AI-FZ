@@ -1,0 +1,241 @@
+:root {
+  --color-bg: #f6faf8;
+  --color-surface: #ffffff;
+  --color-surface-muted: #eef7f2;
+  --color-text: #17211c;
+  --color-text-muted: #68756e;
+  --color-border: #dfe8e3;
+  --color-primary: #087a3d;
+  --color-primary-strong: #04632f;
+  --color-primary-soft: #dcefe5;
+  --color-vip: #d99b16;
+  --color-danger: #e34b4b;
+  --shadow-soft: 0 6px 14px rgba(20, 56, 38, 0.08);
+  --radius-page: 28px;
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+  color: var(--color-text);
+  background: var(--color-bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--color-bg);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100svh;
+  margin: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+a {
+  color: inherit;
+}
+
+#root {
+  min-height: 100svh;
+}
+
+.app-frame {
+  min-height: 100svh;
+  display: flex;
+  justify-content: center;
+  padding: 16px;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(8, 122, 61, 0.09), transparent 34%),
+    var(--color-bg);
+}
+
+.phone-shell {
+  width: min(100%, 430px);
+  min-height: calc(100svh - 32px);
+  overflow: hidden;
+  border: 1px solid rgba(8, 122, 61, 0.1);
+  border-radius: var(--radius-page);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.page {
+  min-height: calc(100svh - 34px);
+  padding: 20px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.brand-logo {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #ffffff;
+  background: var(--color-primary);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  color: #ffffff;
+  background: var(--color-primary);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.hero-panel {
+  padding: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: linear-gradient(180deg, #ffffff 0%, #f4fbf7 100%);
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.page-title {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 24px;
+  line-height: 1.18;
+  font-weight: 800;
+  text-wrap: balance;
+}
+
+.page-copy {
+  margin: 10px 0 0;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+.route-section {
+  margin-top: 18px;
+}
+
+.section-title {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.route-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.route-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: var(--color-surface);
+  text-decoration: none;
+}
+
+.route-item:hover,
+.route-item:focus-visible {
+  border-color: rgba(8, 122, 61, 0.35);
+  outline: none;
+}
+
+.route-meta {
+  min-width: 0;
+}
+
+.route-name {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.route-path {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-state {
+  flex: 0 0 auto;
+  color: var(--color-primary);
+}
+
+@media (max-width: 460px) {
+  .app-frame {
+    padding: 0;
+  }
+
+  .phone-shell {
+    min-height: 100svh;
+    border-width: 0;
+    border-radius: 0;
+  }
+
+  .page {
+    min-height: 100svh;
+    padding: 18px 16px calc(18px + var(--safe-bottom));
+  }
+}

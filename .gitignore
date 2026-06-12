@@ -1,0 +1,18 @@
+.DS_Store
+
+# Frontend
+FZ-front/node_modules/
+FZ-front/dist/
+FZ-front/.env
+
+# Backend
+FZ-backend/.venv/
+FZ-backend/.env
+FZ-backend/.pytest_cache/
+FZ-backend/.ruff_cache/
+FZ-backend/*.egg-info/
+FZ-backend/__pycache__/
+FZ-backend/**/__pycache__/
+
+# Local data
+*.log
