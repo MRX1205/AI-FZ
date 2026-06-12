@@ -20,6 +20,13 @@ FZ-backend/.ruff_cache/
 FZ-backend/*.egg-info/
 FZ-backend/__pycache__/
 FZ-backend/**/__pycache__/
+FZ-backend/uploads/
 
 # Local data
 *.log
+
+# Local tool directories
+.idea/
+.claude/
+.cursor/
+.agents/

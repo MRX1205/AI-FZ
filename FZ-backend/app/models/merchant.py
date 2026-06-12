@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, Enum, String, func
+from sqlalchemy import Boolean, DateTime, Enum, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +25,16 @@ class Merchant(Base):
     )
     vip_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     vip_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    web_notification_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
+    )
+    email_notification_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

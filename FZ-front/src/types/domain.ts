@@ -67,3 +67,108 @@ export type AuthCodeResponse = {
   expiresIn: number
   devCode: string
 }
+
+export type MerchantDashboardLead = {
+  id: string
+  submittedAt: string
+  buyerEmail: string
+  message: string
+  productTitle: string
+}
+
+export type MerchantDashboardResponse = {
+  merchant: MerchantAuthSession['merchant']
+  stats: {
+    listedProducts: number
+    productLimit: number
+    todayLeads: number
+    totalLeads: number
+  }
+  recentLeads: MerchantDashboardLead[]
+}
+
+export type MerchantNotificationSettings = {
+  webNotificationEnabled: boolean
+  emailNotificationEnabled: boolean
+}
+
+export type MerchantProfileResponse = MerchantAuthSession['merchant'] & {
+  vipStartedAt?: string | null
+  vipExpiresAt?: string | null
+  notifications: MerchantNotificationSettings
+}
+
+export type MerchantLeadStatus = 'pending' | 'contacted'
+
+export type MerchantLead = {
+  id: string
+  submittedAt: string
+  buyerEmail: string
+  message: string
+  productTitle: string
+  productPriceCents: number
+  productImageUrl: string
+  status: MerchantLeadStatus
+  merchantEmail: string
+}
+
+export type MerchantLeadListResponse = {
+  merchant: MerchantAuthSession['merchant']
+  leads: MerchantLead[]
+}
+
+export type MerchantSystemNotification = {
+  id: string
+  type: 'new_lead' | 'vip_expiring'
+  content: string
+  sentAt: string
+}
+
+export type MerchantNotificationListResponse = {
+  merchant: MerchantAuthSession['merchant']
+  notifications: MerchantSystemNotification[]
+}
+
+export type MerchantProductStatus = 'draft' | 'listed' | 'unlisted'
+
+export type MerchantProduct = {
+  id: string
+  title: string
+  summary: string
+  detail: string
+  tags: string[]
+  priceCents: number
+  status: MerchantProductStatus
+  imageUrls: string[]
+  publishedAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type MerchantProductListResponse = {
+  merchant: MerchantAuthSession['merchant']
+  products: MerchantProduct[]
+  counts: {
+    all: number
+    listed: number
+    draft: number
+    unlisted: number
+  }
+  quota: {
+    listedCount: number
+    productLimit: number
+    remaining: number
+  }
+}
+
+export type MerchantProductUpdatePayload = {
+  title: string
+  summary: string
+  detail: string
+  tags: string[]
+  priceCents: number
+}
+
+export type MerchantProductDraftGenerateResponse = MerchantProduct
+
+export type MerchantProductPublishPayload = MerchantProductUpdatePayload

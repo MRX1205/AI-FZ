@@ -120,3 +120,20 @@ async def me(credentials: AuthCredentials, db: DbSession) -> MerchantMeOut:
         tier=merchant.tier.value,
         session_expires_at=merchant_session.expires_at,
     )
+
+
+@router.post("/logout")
+async def logout(credentials: AuthCredentials, db: DbSession) -> dict[str, bool]:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    result = await db.execute(
+        select(MerchantSession).where(MerchantSession.token == credentials.credentials)
+    )
+    merchant_session = result.scalar_one_or_none()
+    if merchant_session is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+
+    await db.delete(merchant_session)
+    await db.commit()
+    return {"ok": True}

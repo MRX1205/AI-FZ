@@ -9,8 +9,8 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`)
+export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, init)
 
   if (!response.ok) {
     throw new ApiError(`GET ${path} failed with ${response.status}`, response.status)
@@ -19,13 +19,60 @@ export async function apiGet<T>(path: string): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export async function apiPost<T>(path: string, body: unknown): Promise<T> {
+export async function apiPost<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...init?.headers,
     },
     body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    throw new ApiError(`POST ${path} failed with ${response.status}`, response.status)
+  }
+
+  return response.json() as Promise<T>
+}
+
+export async function apiPatch<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...init?.headers,
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    throw new ApiError(`PATCH ${path} failed with ${response.status}`, response.status)
+  }
+
+  return response.json() as Promise<T>
+}
+
+export async function apiDelete<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    method: 'DELETE',
+  })
+
+  if (!response.ok) {
+    throw new ApiError(`DELETE ${path} failed with ${response.status}`, response.status)
+  }
+
+  return response.json() as Promise<T>
+}
+
+export async function apiUpload<T>(path: string, body: FormData, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    method: 'POST',
+    body,
   })
 
   if (!response.ok) {
