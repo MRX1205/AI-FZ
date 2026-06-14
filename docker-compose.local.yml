@@ -1,5 +1,5 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     ports:
       - "127.0.0.1:55432:5432"

@@ -25,7 +25,7 @@ cp FZ-backend/.env.example FZ-backend/.env
 ```
 
 然后在 `.env` 填写 Docker 服务账号密码，在 `FZ-backend/.env.bak.codex` 填写后端数据库连接、
-`SECRET_KEY` 和 DeepSeek API key。后端实际读取 `FZ-backend/.env.bak.codex`。
+`SECRET_KEY`、MiMo API key 和 DashScope embedding 配置。后端实际读取 `FZ-backend/.env.bak.codex`。
 
 MinIO 控制台：
 

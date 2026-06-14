@@ -12,38 +12,13 @@ import type { ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiGet, apiPatch, apiPost } from '../api/client'
-import type { AuthCodeResponse, MerchantAuthSession, MerchantProfileResponse } from '../types/domain'
-
-const MERCHANT_SESSION_KEY = 'fz_merchant_session_v1'
-
-function readMerchantSession(): MerchantAuthSession | null {
-  try {
-    const raw = localStorage.getItem(MERCHANT_SESSION_KEY)
-    return raw ? (JSON.parse(raw) as MerchantAuthSession) : null
-  } catch {
-    return null
-  }
-}
-
-function writeMerchantSession(profile: MerchantProfileResponse) {
-  const current = readMerchantSession()
-  if (!current) return
-  localStorage.setItem(
-    MERCHANT_SESSION_KEY,
-    JSON.stringify({
-      ...current,
-      merchant: {
-        id: profile.id,
-        email: profile.email,
-        tier: profile.tier,
-      },
-    }),
-  )
-}
-
-function getAuthHeaders(token: string) {
-  return { Authorization: `Bearer ${token}` }
-}
+import type { AuthCodeResponse, MerchantProfileResponse } from '../types/domain'
+import {
+  clearMerchantSession,
+  getAuthHeaders,
+  readMerchantSession,
+  updateMerchantSessionMerchant,
+} from './merchantAuthStorage'
 
 function formatDate(value?: string | null) {
   if (!value) return '2025-05-20'
@@ -78,14 +53,15 @@ export function MerchantProfilePage() {
 
     apiGet<MerchantProfileResponse>('/api/merchant/profile', {
       headers: getAuthHeaders(token),
-    })
+      })
       .then((response) => {
         setProfile(response)
         setNewEmail(response.email)
+        updateMerchantSessionMerchant(response)
       })
       .catch((error) => {
         if (error instanceof ApiError && error.status === 401) {
-          localStorage.removeItem(MERCHANT_SESSION_KEY)
+          clearMerchantSession()
           navigate('/merchant/auth', { replace: true })
         }
       })
@@ -138,7 +114,7 @@ export function MerchantProfilePage() {
         { headers: getAuthHeaders(token) },
       )
       setProfile(response)
-      writeMerchantSession(response)
+      updateMerchantSessionMerchant(response)
       setMessage('修改邮箱成功')
     } catch (error) {
       if (error instanceof ApiError && error.status === 400) {
@@ -167,7 +143,7 @@ export function MerchantProfilePage() {
         // 本地退出优先，后端 token 已失效时也要清理前端登录态。
       }
     }
-    localStorage.removeItem(MERCHANT_SESSION_KEY)
+    clearMerchantSession()
     navigate('/')
   }
 

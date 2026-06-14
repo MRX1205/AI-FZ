@@ -89,6 +89,7 @@ class MerchantNotificationUpdate(BaseModel):
 
 class MerchantLeadOut(BaseModel):
     id: UUID
+    product_id: UUID | None = Field(default=None, serialization_alias="productId")
     submitted_at: datetime = Field(serialization_alias="submittedAt")
     buyer_email: str = Field(serialization_alias="buyerEmail")
     message: str
@@ -124,6 +125,18 @@ class MerchantNotificationListOut(BaseModel):
     notifications: list[MerchantNotificationOut]
 
 
+class MerchantProductImageOut(BaseModel):
+    id: UUID
+    merchant_id: UUID = Field(serialization_alias="merchantId")
+    product_id: UUID = Field(serialization_alias="productId")
+    storage_key: str = Field(serialization_alias="storageKey")
+    public_url: str = Field(serialization_alias="publicUrl")
+    sort_order: int = Field(serialization_alias="sortOrder")
+    created_at: datetime = Field(serialization_alias="createdAt")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class MerchantProductOut(BaseModel):
     id: UUID
     title: str
@@ -133,6 +146,7 @@ class MerchantProductOut(BaseModel):
     price_cents: int = Field(serialization_alias="priceCents")
     status: str
     image_urls: list[str] = Field(serialization_alias="imageUrls")
+    images: list[MerchantProductImageOut] = Field(default_factory=list)
     published_at: datetime | None = Field(default=None, serialization_alias="publishedAt")
     created_at: datetime = Field(serialization_alias="createdAt")
     updated_at: datetime = Field(serialization_alias="updatedAt")
@@ -162,12 +176,18 @@ class MerchantProductListOut(BaseModel):
     quota: MerchantProductQuotaOut
 
 
-class MerchantProductUpdate(BaseModel):
-    title: str = Field(min_length=1, max_length=120)
-    summary: str = Field(min_length=1, max_length=300)
-    detail: str = Field(min_length=1, max_length=1200)
+class MerchantProductCurrentDraftOut(BaseModel):
+    merchant: DashboardMerchantOut
+    product: MerchantProductOut | None
+    quota: MerchantProductQuotaOut
+
+
+class MerchantProductDraftUpdate(BaseModel):
+    title: str = Field(default="", max_length=10)
+    summary: str = Field(default="", max_length=50)
+    detail: str = Field(default="", max_length=300)
     tags: list[str] = Field(default_factory=list, max_length=10)
-    price_cents: int = Field(validation_alias="priceCents", ge=1)
+    price_cents: int = Field(default=0, validation_alias="priceCents", ge=0)
 
     @field_validator("title", "summary", "detail")
     @classmethod

@@ -2,18 +2,13 @@ import { BriefcaseBusiness, ChevronLeft, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiGet } from '../api/client'
-import type { MerchantAuthSession, MerchantProfileResponse } from '../types/domain'
-
-const MERCHANT_SESSION_KEY = 'fz_merchant_session_v1'
-
-function readMerchantSession(): MerchantAuthSession | null {
-  try {
-    const raw = localStorage.getItem(MERCHANT_SESSION_KEY)
-    return raw ? (JSON.parse(raw) as MerchantAuthSession) : null
-  } catch {
-    return null
-  }
-}
+import type { MerchantProfileResponse } from '../types/domain'
+import {
+  clearMerchantSession,
+  getAuthHeaders,
+  readMerchantSession,
+  updateMerchantSessionMerchant,
+} from './merchantAuthStorage'
 
 function formatDate(value?: string | null) {
   if (!value) return '2025-05-20'
@@ -39,12 +34,15 @@ export function MerchantAccountPage() {
     }
 
     apiGet<MerchantProfileResponse>('/api/merchant/profile', {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: getAuthHeaders(token),
     })
-      .then(setProfile)
+      .then((response) => {
+        setProfile(response)
+        updateMerchantSessionMerchant(response)
+      })
       .catch((error) => {
         if (error instanceof ApiError && error.status === 401) {
-          localStorage.removeItem(MERCHANT_SESSION_KEY)
+          clearMerchantSession()
           navigate('/merchant/auth', { replace: true })
         }
       })

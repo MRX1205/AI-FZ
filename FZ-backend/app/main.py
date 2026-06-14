@@ -10,7 +10,7 @@ from app.core.config import settings
 
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name)
-    uploads_dir = Path(__file__).resolve().parents[2] / "uploads"
+    uploads_dir = Path(__file__).resolve().parents[1] / "uploads"
     uploads_dir.mkdir(parents=True, exist_ok=True)
 
     app.add_middleware(

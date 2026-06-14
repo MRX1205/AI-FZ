@@ -25,6 +25,29 @@ export type ProductCard = {
   merchantTier: MerchantTier
 }
 
+export type PublicProduct = {
+  id: string
+  title: string
+  summary: string
+  detail: string
+  tags: string[]
+  priceCents: number
+  imageUrls: string[]
+  merchantTier: MerchantTier
+  createdAt: string
+  updatedAt: string
+}
+
+export type PublicProductContactPayload = {
+  buyerEmail: string
+}
+
+export type PublicProductContactResponse = {
+  ok: boolean
+  message: string
+  leadId?: string | null
+}
+
 export type Lead = {
   id: string
   productId: string
@@ -102,6 +125,7 @@ export type MerchantLeadStatus = 'pending' | 'contacted'
 
 export type MerchantLead = {
   id: string
+  productId?: string | null
   submittedAt: string
   buyerEmail: string
   message: string
@@ -159,6 +183,12 @@ export type MerchantProductListResponse = {
     productLimit: number
     remaining: number
   }
+}
+
+export type MerchantProductCurrentDraftResponse = {
+  merchant: MerchantAuthSession['merchant']
+  product: MerchantProduct | null
+  quota: MerchantProductListResponse['quota']
 }
 
 export type MerchantProductUpdatePayload = {

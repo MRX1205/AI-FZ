@@ -15,6 +15,7 @@ from app.schemas.chat import (
     ChatSessionOut,
 )
 from app.services.jade_agent import jade_agent
+from app.services.visitor_product_matcher import match_products_for_need
 
 router = APIRouter(prefix="/chat")
 
@@ -42,6 +43,47 @@ async def _get_session_or_404(session_id: UUID, db: AsyncSession) -> ChatSession
 
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+async def _recent_chat_history(session_id: UUID, db: AsyncSession) -> list[dict[str, str]]:
+    history_result = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.created_at.desc())
+        .limit(20)
+    )
+    previous_messages = list(reversed(history_result.scalars().all()))
+    return [
+        {"role": message.role, "content": message.content}
+        for message in previous_messages
+        if message.role in {"user", "assistant"}
+    ]
+
+
+async def _save_message_pair(
+    *,
+    session_id: UUID,
+    user_content: str,
+    assistant_content: str,
+    matched_products: list[dict] | None,
+    db: AsyncSession,
+) -> ChatMessagePairOut:
+    user_message = ChatMessage(session_id=session_id, role="user", content=user_content)
+    assistant_message = ChatMessage(
+        session_id=session_id,
+        role="assistant",
+        content=assistant_content,
+        matched_products=matched_products,
+    )
+    db.add_all([user_message, assistant_message])
+    await db.commit()
+    await db.refresh(user_message)
+    await db.refresh(assistant_message)
+
+    return ChatMessagePairOut(
+        user_message=_message_out(user_message),
+        assistant_message=_message_out(assistant_message),
+    )
 
 
 @router.post("/sessions", response_model=ChatSessionOut, response_model_by_alias=True)
@@ -82,34 +124,38 @@ async def create_message(
     db: DbSession,
 ) -> ChatMessagePairOut:
     await _get_session_or_404(session_id, db)
-    history_result = await db.execute(
-        select(ChatMessage)
-        .where(ChatMessage.session_id == session_id)
-        .order_by(ChatMessage.created_at.desc())
-        .limit(20)
-    )
-    previous_messages = list(reversed(history_result.scalars().all()))
-    history = [
-        {"role": message.role, "content": message.content}
-        for message in previous_messages
-        if message.role in {"user", "assistant"}
-    ]
+    history = await _recent_chat_history(session_id, db)
     history.append({"role": "user", "content": payload.content})
     agent_result = await jade_agent.reply(payload.content, history)
 
-    user_message = ChatMessage(session_id=session_id, role="user", content=payload.content)
-    assistant_message = ChatMessage(
+    return await _save_message_pair(
         session_id=session_id,
-        role="assistant",
-        content=agent_result.content,
+        user_content=payload.content,
+        assistant_content=agent_result.content,
         matched_products=None,
+        db=db,
     )
-    db.add_all([user_message, assistant_message])
-    await db.commit()
-    await db.refresh(user_message)
-    await db.refresh(assistant_message)
 
-    return ChatMessagePairOut(
-        user_message=_message_out(user_message),
-        assistant_message=_message_out(assistant_message),
+
+@router.post(
+    "/sessions/{session_id}/matches",
+    response_model=ChatMessagePairOut,
+    response_model_by_alias=True,
+)
+async def create_match_message(
+    session_id: UUID,
+    payload: ChatMessageCreate,
+    db: DbSession,
+) -> ChatMessagePairOut:
+    await _get_session_or_404(session_id, db)
+    match_result = await match_products_for_need(payload.content, db)
+
+    return await _save_message_pair(
+        session_id=session_id,
+        user_content=payload.content,
+        assistant_content=match_result.content,
+        matched_products=[
+            product.model_dump(by_alias=True) for product in match_result.products
+        ],
+        db=db,
     )

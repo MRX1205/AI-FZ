@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,7 @@ from app.db.session import get_db
 from app.models.auth import AuthCode, MerchantSession
 from app.models.lead import MerchantLead, MerchantNotification
 from app.models.merchant import Merchant, MerchantTier
-from app.models.product import MerchantProduct
+from app.models.product import MerchantProduct, MerchantProductEmbedding, MerchantProductImage
 from app.schemas.auth import AuthCodeOut
 from app.schemas.merchant import (
     DashboardLeadOut,
@@ -30,13 +30,24 @@ from app.schemas.merchant import (
     MerchantNotificationOut,
     MerchantNotificationUpdate,
     MerchantProductCountsOut,
+    MerchantProductCurrentDraftOut,
+    MerchantProductDraftUpdate,
+    MerchantProductImageOut,
     MerchantProductListOut,
     MerchantProductOut,
     MerchantProductQuotaOut,
     MerchantProductStatusUpdate,
-    MerchantProductUpdate,
     MerchantProfileOut,
     NotificationSettingsOut,
+)
+from app.services.embeddings import ProductEmbeddingError, embedding_client
+from app.services.product_image_recognition_agent import (
+    ProductImageRecognitionError,
+    product_image_recognition_agent,
+)
+from app.services.product_search import (
+    product_search_content_hash,
+    refresh_product_search_text,
 )
 
 router = APIRouter(prefix="/merchant")
@@ -110,6 +121,7 @@ def _visible_buyer_email(merchant: Merchant, buyer_email: str) -> str:
 def _lead_out(lead: MerchantLead, merchant: Merchant) -> MerchantLeadOut:
     return MerchantLeadOut(
         id=lead.id,
+        product_id=lead.product_id,
         submitted_at=lead.submitted_at,
         buyer_email=_visible_buyer_email(merchant, lead.buyer_email),
         message=lead.message,
@@ -121,11 +133,89 @@ def _lead_out(lead: MerchantLead, merchant: Merchant) -> MerchantLeadOut:
     )
 
 
+async def _product_embedding(
+    product: MerchantProduct,
+    db: AsyncSession,
+) -> MerchantProductEmbedding | None:
+    result = await db.execute(
+        select(MerchantProductEmbedding).where(
+            MerchantProductEmbedding.product_id == product.id,
+            MerchantProductEmbedding.merchant_id == product.merchant_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def _refresh_product_embedding(
+    product: MerchantProduct,
+    db: AsyncSession,
+) -> None:
+    refresh_product_search_text(product)
+    content_hash = product_search_content_hash(product)
+    existing = await _product_embedding(product, db)
+    if existing and existing.content_hash == content_hash:
+        return
+
+    try:
+        result = await embedding_client.embed_document(product.search_text)
+    except ProductEmbeddingError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+
+    if existing is None:
+        db.add(
+            MerchantProductEmbedding(
+                merchant_id=product.merchant_id,
+                product_id=product.id,
+                provider=result.provider,
+                model=result.model,
+                dimensions=result.dimensions,
+                content_hash=content_hash,
+                embedding=result.embedding,
+            )
+        )
+        return
+
+    existing.provider = result.provider
+    existing.model = result.model
+    existing.dimensions = result.dimensions
+    existing.content_hash = content_hash
+    existing.embedding = result.embedding
+
+
 def _product_limit(merchant: Merchant) -> int:
     return 100 if merchant.tier == MerchantTier.vip else 2
 
 
-def _product_out(product: MerchantProduct) -> MerchantProductOut:
+async def _product_images(
+    product: MerchantProduct,
+    db: AsyncSession,
+) -> list[MerchantProductImage]:
+    result = await db.execute(
+        select(MerchantProductImage)
+        .where(
+            MerchantProductImage.product_id == product.id,
+            MerchantProductImage.merchant_id == product.merchant_id,
+        )
+        .order_by(MerchantProductImage.sort_order.asc(), MerchantProductImage.created_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+def _product_image_out(image: MerchantProductImage) -> MerchantProductImageOut:
+    return MerchantProductImageOut(
+        id=image.id,
+        merchant_id=image.merchant_id,
+        product_id=image.product_id,
+        storage_key=image.storage_key,
+        public_url=image.public_url,
+        sort_order=image.sort_order,
+        created_at=image.created_at,
+    )
+
+
+async def _product_out(product: MerchantProduct, db: AsyncSession) -> MerchantProductOut:
+    images = await _product_images(product, db)
+    image_urls = list(product.image_urls or []) or [image.public_url for image in images]
     return MerchantProductOut(
         id=product.id,
         title=product.title,
@@ -134,11 +224,20 @@ def _product_out(product: MerchantProduct) -> MerchantProductOut:
         tags=product.tags,
         price_cents=product.price_cents,
         status=product.status,
-        image_urls=product.image_urls,
+        image_urls=image_urls,
+        images=[_product_image_out(image) for image in images],
         published_at=product.published_at,
         created_at=product.created_at,
         updated_at=product.updated_at,
     )
+
+
+async def _current_product_image_urls(
+    product: MerchantProduct,
+    db: AsyncSession,
+) -> list[str]:
+    images = await _product_images(product, db)
+    return list(product.image_urls or []) or [image.public_url for image in images]
 
 
 async def _get_merchant_product(
@@ -156,6 +255,40 @@ async def _get_merchant_product(
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     return product
+
+
+async def _is_publish_flow_draft(
+    product: MerchantProduct,
+    db: AsyncSession,
+) -> bool:
+    image_urls = await _current_product_image_urls(product, db)
+    has_uploaded_image = any(image_url.startswith("/uploads/") for image_url in image_urls)
+    is_empty_upload_draft = (
+        not product.title
+        and not product.summary
+        and not product.detail
+        and not product.tags
+        and product.price_cents == 0
+    )
+    return has_uploaded_image or is_empty_upload_draft
+
+
+async def _get_latest_publish_flow_draft(
+    merchant: Merchant,
+    db: AsyncSession,
+) -> MerchantProduct | None:
+    result = await db.execute(
+        select(MerchantProduct)
+        .where(
+            MerchantProduct.merchant_id == merchant.id,
+            MerchantProduct.status == "draft",
+        )
+        .order_by(MerchantProduct.updated_at.desc(), MerchantProduct.created_at.desc())
+    )
+    for product in result.scalars():
+        if await _is_publish_flow_draft(product, db):
+            return product
+    return None
 
 
 async def _product_counts(
@@ -201,8 +334,14 @@ async def _seed_products_if_empty(merchant: Merchant, db: AsyncSession) -> None:
             tags=["冰种", "晴底色", "翡翠手镯", "正圈", "55圈口"],
             price_cents=4_800_000,
             status="listed",
-            image_urls=["/mock-products/jade-1.png"],
+            image_urls=[
+                "/mock-products/jade-1.png",
+                "/mock-products/jade-2.png",
+                "/mock-products/jade-3.png",
+            ],
             published_at=datetime(2026, 5, 20, 10, 30, tzinfo=UTC),
+            created_at=datetime(2026, 5, 20, 10, 30, tzinfo=UTC),
+            updated_at=datetime(2026, 5, 20, 10, 30, tzinfo=UTC),
         ),
         MerchantProduct(
             merchant_id=merchant.id,
@@ -212,8 +351,10 @@ async def _seed_products_if_empty(merchant: Merchant, db: AsyncSession) -> None:
             tags=["冰种", "飘花", "翡翠吊坠"],
             price_cents=3_200_000,
             status="draft",
-            image_urls=["/mock-products/jade-3.png"],
+            image_urls=["/mock-products/jade-2.png", "/mock-products/jade-3.png"],
             published_at=None,
+            created_at=datetime(2026, 5, 18, 10, 30, tzinfo=UTC),
+            updated_at=datetime(2026, 5, 18, 10, 30, tzinfo=UTC),
         ),
         MerchantProduct(
             merchant_id=merchant.id,
@@ -225,6 +366,8 @@ async def _seed_products_if_empty(merchant: Merchant, db: AsyncSession) -> None:
             status="unlisted",
             image_urls=["/mock-products/jade-1.png"],
             published_at=datetime(2026, 5, 15, 14, 30, tzinfo=UTC),
+            created_at=datetime(2026, 5, 15, 14, 30, tzinfo=UTC),
+            updated_at=datetime(2026, 5, 15, 14, 30, tzinfo=UTC),
         ),
     ]
     if merchant.tier == MerchantTier.vip:
@@ -240,24 +383,45 @@ async def _seed_products_if_empty(merchant: Merchant, db: AsyncSession) -> None:
                     status="listed",
                     image_urls=[f"/mock-products/jade-{((index - 1) % 3) + 1}.png"],
                     published_at=datetime(2026, 5, min(28, 10 + index), 10, 0, tzinfo=UTC),
+                    created_at=datetime(2026, 5, min(28, 10 + index), 10, 0, tzinfo=UTC),
+                    updated_at=datetime(2026, 5, min(28, 10 + index), 10, 0, tzinfo=UTC),
                 )
             )
     db.add_all(seed_products)
     await db.commit()
 
 
-async def _apply_product_update(
+async def _apply_product_draft_update(
     product: MerchantProduct,
-    payload: MerchantProductUpdate,
+    payload: MerchantProductDraftUpdate,
 ) -> None:
     product.title = payload.title
     product.summary = payload.summary
     product.detail = payload.detail
     product.tags = payload.tags
     product.price_cents = payload.price_cents
+    refresh_product_search_text(product)
 
 
-def _save_product_image(file: UploadFile) -> str:
+async def _assert_product_ready_to_publish(
+    product: MerchantProduct,
+    db: AsyncSession,
+) -> None:
+    image_urls = await _current_product_image_urls(product, db)
+    if not image_urls:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先上传商品图片")
+    if not product.title.strip() or not product.summary.strip() or not product.detail.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请完整填写商品信息")
+    if product.price_cents <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请填写商品价格")
+
+
+def _save_merchant_product_image(
+    file: UploadFile,
+    merchant: Merchant,
+    product: MerchantProduct,
+    image_id: UUID,
+) -> tuple[str, str]:
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Image file required")
 
@@ -265,30 +429,22 @@ def _save_product_image(file: UploadFile) -> str:
     if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
         suffix = ".jpg"
 
-    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-    filename = f"{uuid.uuid4().hex}{suffix}"
-    target = UPLOAD_ROOT / filename
+    storage_key = (
+        f"merchants/{merchant.id}/products/{product.id}/{image_id}{suffix}"
+    )
+    target = UPLOAD_ROOT.parent / storage_key
+    target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    return f"/uploads/products/{filename}"
+
+    return storage_key, f"/uploads/{storage_key}"
 
 
-def _generated_product_fields(image_count: int) -> dict[str, object]:
-    title = "冰种晴底翡翠手镯" if image_count == 1 else "多图冰种翡翠精品"
-    summary = "AI根据图片生成，质地细腻通透，清新淡雅。"
-    detail = (
-        "该商品由AI根据上传图片生成初稿。整体观感清爽，翡翠种水表现自然，"
-        "适合日常佩戴或送礼收藏。请商家发布前根据实物补充圈口、尺寸、证书等信息。"
-    )
-    tags = ["冰种", "翡翠", "AI生成", "清爽", "送礼佳品"]
-    price_cents = 48_000 * 100
-    return {
-        "title": title,
-        "summary": summary,
-        "detail": detail,
-        "tags": tags,
-        "price_cents": price_cents,
-    }
+def _remove_uploaded_file(image_url: str) -> None:
+    if not image_url.startswith("/uploads/"):
+        return
+    image_path = UPLOAD_ROOT.parent / image_url.removeprefix("/uploads/")
+    image_path.unlink(missing_ok=True)
 
 
 def _quota_exceeded_detail(merchant: Merchant) -> str:
@@ -545,14 +701,101 @@ async def products(
         statement = statement.where(MerchantProduct.status == product_status)
     statement = statement.order_by(MerchantProduct.created_at.desc())
     result = await db.execute(statement)
+    products_out = [await _product_out(product, db) for product in result.scalars().all()]
     counts, quota = await _product_counts(merchant, db)
 
     return MerchantProductListOut(
         merchant=_dashboard_merchant_out(merchant),
-        products=[_product_out(product) for product in result.scalars().all()],
+        products=products_out,
         counts=counts,
         quota=quota,
     )
+
+
+@router.get(
+    "/products/current-draft",
+    response_model=MerchantProductCurrentDraftOut,
+    response_model_by_alias=True,
+)
+async def current_product_draft(
+    credentials: AuthCredentials,
+    db: DbSession,
+) -> MerchantProductCurrentDraftOut:
+    merchant = await _get_current_merchant(credentials, db)
+    await _seed_products_if_empty(merchant, db)
+    draft = await _get_latest_publish_flow_draft(merchant, db)
+    _, quota = await _product_counts(merchant, db)
+
+    return MerchantProductCurrentDraftOut(
+        merchant=_dashboard_merchant_out(merchant),
+        product=await _product_out(draft, db) if draft else None,
+        quota=quota,
+    )
+
+
+@router.post(
+    "/products/drafts/images",
+    response_model=MerchantProductOut,
+    response_model_by_alias=True,
+)
+async def append_product_draft_images(
+    credentials: AuthCredentials,
+    db: DbSession,
+    images: Annotated[list[UploadFile] | None, File()] = None,
+) -> MerchantProductOut:
+    merchant = await _get_current_merchant(credentials, db)
+    await _seed_products_if_empty(merchant, db)
+
+    if not images:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先上传商品图片")
+
+    draft = await _get_latest_publish_flow_draft(merchant, db)
+    current_image_urls = await _current_product_image_urls(draft, db) if draft else []
+    if len(current_image_urls) + len(images) > 6:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="最多上传6张图片")
+
+    if draft is None:
+        draft = MerchantProduct(
+            merchant_id=merchant.id,
+            title="",
+            summary="",
+            detail="",
+            tags=[],
+            price_cents=0,
+            status="draft",
+            image_urls=[],
+            published_at=None,
+        )
+        db.add(draft)
+        await db.flush()
+    else:
+        draft.title = ""
+        draft.summary = ""
+        draft.detail = ""
+        draft.tags = []
+        draft.price_cents = 0
+
+    image_urls: list[str] = []
+    for offset, image in enumerate(images):
+        image_id = uuid.uuid4()
+        storage_key, public_url = _save_merchant_product_image(image, merchant, draft, image_id)
+        db.add(
+            MerchantProductImage(
+                id=image_id,
+                merchant_id=merchant.id,
+                product_id=draft.id,
+                storage_key=storage_key,
+                public_url=public_url,
+                sort_order=len(current_image_urls) + offset,
+            )
+        )
+        image_urls.append(public_url)
+    draft.image_urls = current_image_urls + image_urls
+
+    await db.commit()
+    await db.refresh(draft)
+
+    return await _product_out(draft, db)
 
 
 @router.post(
@@ -563,37 +806,72 @@ async def products(
 async def generate_product_draft(
     credentials: AuthCredentials,
     db: DbSession,
+    product_id: Annotated[UUID | None, Form(alias="productId")] = None,
     images: Annotated[list[UploadFile] | None, File()] = None,
 ) -> MerchantProductOut:
     merchant = await _get_current_merchant(credentials, db)
     await _seed_products_if_empty(merchant, db)
 
-    if not images:
+    draft = await _get_merchant_product(product_id, merchant, db) if product_id else None
+    current_image_urls = await _current_product_image_urls(draft, db) if draft else []
+
+    if not images and not current_image_urls:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先上传商品图片")
-    if len(images) > 6:
+    if images and len(images) + len(current_image_urls) > 6:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="最多上传6张图片")
 
-    await _assert_product_quota_available(merchant, db)
+    product = draft
+    if product is None:
+        product = MerchantProduct(
+            merchant_id=merchant.id,
+            title="",
+            summary="",
+            detail="",
+            tags=[],
+            price_cents=0,
+            status="draft",
+            image_urls=[],
+            published_at=None,
+        )
+        db.add(product)
+        await db.flush()
 
-    # 首版 AI 识别使用规则生成稳定字段，后续接多模态模型时只替换生成函数。
-    image_urls = [_save_product_image(image) for image in images]
-    generated_fields = _generated_product_fields(len(image_urls))
-    product = MerchantProduct(
-        merchant_id=merchant.id,
-        title=str(generated_fields["title"]),
-        summary=str(generated_fields["summary"]),
-        detail=str(generated_fields["detail"]),
-        tags=generated_fields["tags"],
-        price_cents=int(generated_fields["price_cents"]),
-        status="draft",
-        image_urls=image_urls,
-        published_at=None,
-    )
-    db.add(product)
-    await db.commit()
-    await db.refresh(product)
+    uploaded_image_urls: list[str] = []
+    if images:
+        for offset, image in enumerate(images):
+            image_id = uuid.uuid4()
+            storage_key, public_url = _save_merchant_product_image(
+                image,
+                merchant,
+                product,
+                image_id,
+            )
+            db.add(
+                MerchantProductImage(
+                    id=image_id,
+                    merchant_id=merchant.id,
+                    product_id=product.id,
+                    storage_key=storage_key,
+                    public_url=public_url,
+                    sort_order=len(current_image_urls) + offset,
+                )
+            )
+            uploaded_image_urls.append(public_url)
 
-    return _product_out(product)
+    image_urls = current_image_urls + uploaded_image_urls
+    try:
+        product = await product_image_recognition_agent.recognize_and_save_product(
+            product=product,
+            image_urls=image_urls,
+            db=db,
+        )
+    except ProductImageRecognitionError as error:
+        for image_url in uploaded_image_urls:
+            _remove_uploaded_file(image_url)
+        await db.rollback()
+        raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+
+    return await _product_out(product, db)
 
 
 @router.get(
@@ -610,7 +888,7 @@ async def product_detail(
     await _seed_products_if_empty(merchant, db)
     product = await _get_merchant_product(product_id, merchant, db)
 
-    return _product_out(product)
+    return await _product_out(product, db)
 
 
 @router.patch(
@@ -620,23 +898,25 @@ async def product_detail(
 )
 async def publish_product(
     product_id: UUID,
-    payload: MerchantProductUpdate,
+    payload: MerchantProductDraftUpdate,
     credentials: AuthCredentials,
     db: DbSession,
 ) -> MerchantProductOut:
     merchant = await _get_current_merchant(credentials, db)
     product = await _get_merchant_product(product_id, merchant, db)
-    await _apply_product_update(product, payload)
+    await _apply_product_draft_update(product, payload)
+    await _assert_product_ready_to_publish(product, db)
 
     if product.status != "listed":
         await _assert_product_quota_available(merchant, db)
     product.status = "listed"
     product.published_at = product.published_at or datetime.now(UTC)
+    await _refresh_product_embedding(product, db)
 
     await db.commit()
     await db.refresh(product)
 
-    return _product_out(product)
+    return await _product_out(product, db)
 
 
 @router.patch(
@@ -646,17 +926,19 @@ async def publish_product(
 )
 async def update_product(
     product_id: UUID,
-    payload: MerchantProductUpdate,
+    payload: MerchantProductDraftUpdate,
     credentials: AuthCredentials,
     db: DbSession,
 ) -> MerchantProductOut:
     merchant = await _get_current_merchant(credentials, db)
     product = await _get_merchant_product(product_id, merchant, db)
-    await _apply_product_update(product, payload)
+    await _apply_product_draft_update(product, payload)
+    if product.status == "listed":
+        await _refresh_product_embedding(product, db)
     await db.commit()
     await db.refresh(product)
 
-    return _product_out(product)
+    return await _product_out(product, db)
 
 
 @router.patch(
@@ -678,13 +960,15 @@ async def update_product_status(
         product.published_at = datetime.now(UTC)
 
     product.status = payload.status
+    if payload.status == "listed":
+        await _refresh_product_embedding(product, db)
     if payload.status != "listed" and product.published_at is None:
         product.published_at = None
 
     await db.commit()
     await db.refresh(product)
 
-    return _product_out(product)
+    return await _product_out(product, db)
 
 
 @router.delete("/products/{product_id}")
@@ -701,6 +985,48 @@ async def delete_product(
     return {"ok": True}
 
 
+@router.delete(
+    "/products/{product_id}/images/{image_index}",
+    response_model=MerchantProductOut,
+    response_model_by_alias=True,
+)
+async def delete_product_image(
+    product_id: UUID,
+    image_index: int,
+    credentials: AuthCredentials,
+    db: DbSession,
+) -> MerchantProductOut:
+    merchant = await _get_current_merchant(credentials, db)
+    product = await _get_merchant_product(product_id, merchant, db)
+    images = await _product_images(product, db)
+    image_urls = await _current_product_image_urls(product, db)
+    if image_index < 0 or image_index >= len(image_urls):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+
+    removed_image = next((image for image in images if image.sort_order == image_index), None)
+    if removed_image is not None:
+        _remove_uploaded_file(removed_image.public_url)
+        await db.delete(removed_image)
+    else:
+        _remove_uploaded_file(image_urls[image_index])
+    for image in images:
+        if image.sort_order > image_index:
+            image.sort_order -= 1
+
+    product.image_urls = [
+        image_url for index, image_url in enumerate(image_urls) if index != image_index
+    ]
+    product.title = ""
+    product.summary = ""
+    product.detail = ""
+    product.tags = []
+    product.price_cents = 0
+    await db.commit()
+    await db.refresh(product)
+
+    return await _product_out(product, db)
+
+
 @router.post(
     "/products/{product_id}/images/replace",
     response_model=MerchantProductOut,
@@ -711,15 +1037,56 @@ async def replace_product_image(
     credentials: AuthCredentials,
     db: DbSession,
     file: Annotated[UploadFile, File(...)],
+    image_index: Annotated[int, Form(alias="imageIndex")] = 0,
 ) -> MerchantProductOut:
     merchant = await _get_current_merchant(credentials, db)
     product = await _get_merchant_product(product_id, merchant, db)
-    image_url = _save_product_image(file)
-    product.image_urls = [image_url, *product.image_urls[1:]]
+    images = await _product_images(product, db)
+    image_urls = await _current_product_image_urls(product, db)
+    image_id = uuid.uuid4()
+    storage_key, public_url = _save_merchant_product_image(file, merchant, product, image_id)
+
+    safe_index = min(max(image_index, 0), max(len(image_urls) - 1, 0))
+    image = next(
+        (product_image for product_image in images if product_image.sort_order == safe_index),
+        None,
+    )
+
+    if image is not None:
+        _remove_uploaded_file(image.public_url)
+        image.storage_key = storage_key
+        image.public_url = public_url
+        image_urls[safe_index] = public_url
+    elif not image_urls:
+        db.add(
+            MerchantProductImage(
+                id=image_id,
+                merchant_id=merchant.id,
+                product_id=product.id,
+                storage_key=storage_key,
+                public_url=public_url,
+                sort_order=0,
+            )
+        )
+        image_urls = [public_url]
+    else:
+        _remove_uploaded_file(image_urls[safe_index])
+        db.add(
+            MerchantProductImage(
+                id=image_id,
+                merchant_id=merchant.id,
+                product_id=product.id,
+                storage_key=storage_key,
+                public_url=public_url,
+                sort_order=safe_index,
+            )
+        )
+        image_urls[safe_index] = public_url
+    product.image_urls = image_urls
     await db.commit()
     await db.refresh(product)
 
-    return _product_out(product)
+    return await _product_out(product, db)
 
 
 @router.get("/leads", response_model=MerchantLeadListOut, response_model_by_alias=True)

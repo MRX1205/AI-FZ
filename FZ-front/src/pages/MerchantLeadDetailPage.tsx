@@ -1,9 +1,14 @@
 import { ChevronLeft } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ApiError, apiGet, apiPatch } from '../api/client'
-import type { MerchantLead } from '../types/domain'
-import { clearMerchantSession, getAuthHeaders, readMerchantSession } from './merchantAuthStorage'
+import { ApiError, apiAssetUrl, apiGet, apiPatch } from '../api/client'
+import type { MerchantAuthSession, MerchantLead } from '../types/domain'
+import {
+  clearMerchantSession,
+  getAuthHeaders,
+  readMerchantSession,
+  updateMerchantSessionMerchant,
+} from './merchantAuthStorage'
 
 function formatFullTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -19,11 +24,7 @@ function formatFullTime(value: string) {
 }
 
 function formatPrice(cents: number) {
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'CNY',
-    maximumFractionDigits: 0,
-  }).format(cents / 100)
+  return `${Math.round(cents / 100).toLocaleString('zh-CN')}元`
 }
 
 export function MerchantLeadDetailPage() {
@@ -31,7 +32,7 @@ export function MerchantLeadDetailPage() {
   const { id } = useParams()
   const session = useMemo(() => readMerchantSession(), [])
   const token = session?.token ?? ''
-  const isVip = session?.merchant.tier === 'vip'
+  const [merchant, setMerchant] = useState<MerchantAuthSession['merchant'] | null>(session?.merchant ?? null)
   const [lead, setLead] = useState<MerchantLead | null>(null)
   const [message, setMessage] = useState('')
 
@@ -42,10 +43,19 @@ export function MerchantLeadDetailPage() {
     }
     if (!id) return
 
-    apiGet<MerchantLead>(`/api/merchant/leads/${id}`, {
-      headers: getAuthHeaders(token),
-    })
-      .then(setLead)
+    Promise.all([
+      apiGet<MerchantAuthSession['merchant']>('/api/auth/me', {
+        headers: getAuthHeaders(token),
+      }),
+      apiGet<MerchantLead>(`/api/merchant/leads/${id}`, {
+        headers: getAuthHeaders(token),
+      }),
+    ])
+      .then(([nextMerchant, nextLead]) => {
+        setMerchant(nextMerchant)
+        updateMerchantSessionMerchant(nextMerchant)
+        setLead(nextLead)
+      })
       .catch((error) => {
         if (error instanceof ApiError && error.status === 401) {
           clearMerchantSession()
@@ -72,6 +82,8 @@ export function MerchantLeadDetailPage() {
     setLead(response)
     setMessage('已标记为已联系')
   }
+
+  const isVip = merchant?.tier === 'vip'
 
   return (
     <section className="merchant-lead-detail-page">
@@ -100,7 +112,7 @@ export function MerchantLeadDetailPage() {
               <div className="lead-detail-row">
                 <strong>关联商品</strong>
                 <div className="lead-product-mini">
-                  <img alt="" src={lead.productImageUrl} />
+                  <img alt="" src={apiAssetUrl(lead.productImageUrl)} />
                   <span>
                     <em>{lead.productTitle}</em>
                     <small>{formatPrice(lead.productPriceCents)}</small>

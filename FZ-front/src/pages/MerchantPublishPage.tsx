@@ -1,15 +1,19 @@
-import { CheckCircle2, ChevronLeft, ImagePlus, Loader2, Plus } from 'lucide-react'
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { CheckCircle2, ChevronLeft, Edit3, ImagePlus, Loader2, Plus, X } from 'lucide-react'
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ApiError, apiGet, apiUpload } from '../api/client'
-import type { MerchantProductDraftGenerateResponse, MerchantProductListResponse } from '../types/domain'
-import { clearMerchantSession, getAuthHeaders, readMerchantSession } from './merchantAuthStorage'
-
-type UploadPreview = {
-  id: string
-  file: File
-  url: string
-}
+import { ApiError, apiAssetUrl, apiDelete, apiGet, apiPatch, apiUpload } from '../api/client'
+import type {
+  MerchantProduct,
+  MerchantProductCurrentDraftResponse,
+  MerchantProductDraftGenerateResponse,
+  MerchantProductPublishPayload,
+} from '../types/domain'
+import {
+  clearMerchantSession,
+  getAuthHeaders,
+  readMerchantSession,
+  updateMerchantSessionMerchant,
+} from './merchantAuthStorage'
 
 const steps = [
   {
@@ -18,7 +22,7 @@ const steps = [
   },
   {
     title: 'AI智能生成',
-    description: '正在识别图片特征，生成商品信息...',
+    description: 'AI识别图片特征，生成商品信息',
   },
   {
     title: '编辑商品信息',
@@ -34,11 +38,26 @@ export function MerchantPublishPage() {
   const navigate = useNavigate()
   const token = useMemo(() => readMerchantSession()?.token ?? '', [])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const previewsRef = useRef<UploadPreview[]>([])
-  const [data, setData] = useState<MerchantProductListResponse | null>(null)
-  const [previews, setPreviews] = useState<UploadPreview[]>([])
+  const [draftData, setDraftData] = useState<MerchantProductCurrentDraftResponse | null>(null)
   const [toast, setToast] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const [isPublishing, setIsPublishing] = useState(false)
+  const [hasGenerated, setHasGenerated] = useState(false)
+
+  const loadDraft = useCallback(async () => {
+    const response = await apiGet<MerchantProductCurrentDraftResponse>(
+      `/api/merchant/products/current-draft?_ts=${Date.now()}`,
+      {
+        headers: getAuthHeaders(token),
+        cache: 'no-store',
+      },
+    )
+    setDraftData(response)
+    updateMerchantSessionMerchant(response.merchant)
+    setHasGenerated(Boolean(response.product?.title || response.product?.summary || response.product?.detail))
+    return response
+  }, [token])
 
   useEffect(() => {
     if (!token) {
@@ -46,23 +65,17 @@ export function MerchantPublishPage() {
       return
     }
 
-    apiGet<MerchantProductListResponse>('/api/merchant/products?status=all', {
-      headers: getAuthHeaders(token),
-    })
-      .then(setData)
-      .catch((error) => {
+    void Promise.resolve().then(async () => {
+      try {
+        await loadDraft()
+      } catch (error) {
         if (error instanceof ApiError && error.status === 401) {
           clearMerchantSession()
           navigate('/merchant/auth', { replace: true })
         }
-      })
-  }, [navigate, token])
-
-  useEffect(() => {
-    previewsRef.current = previews
-  }, [previews])
-
-  useEffect(() => () => previewsRef.current.forEach((preview) => URL.revokeObjectURL(preview.url)), [])
+      }
+    })
+  }, [loadDraft, navigate, token])
 
   function showToast(message: string) {
     setToast(message)
@@ -78,7 +91,9 @@ export function MerchantPublishPage() {
     if (imageFiles.length !== files.length) {
       showToast('请上传图片文件')
     }
-    const remaining = 6 - previews.length
+    if (imageFiles.length === 0) return
+    const currentCount = draftData?.product?.imageUrls.length ?? 0
+    const remaining = 6 - currentCount
     if (remaining <= 0) {
       showToast('最多上传6张图片')
       return
@@ -87,60 +102,113 @@ export function MerchantPublishPage() {
       showToast('最多上传6张图片')
     }
 
-    const nextPreviews = imageFiles.slice(0, remaining).map((file) => ({
-      id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`,
-      file,
-      url: URL.createObjectURL(file),
-    }))
-    setPreviews((current) => [...current, ...nextPreviews])
+    const formData = new FormData()
+    imageFiles.slice(0, remaining).forEach((file) => formData.append('images', file))
+    setIsUploading(true)
+    apiUpload<MerchantProduct>('/api/merchant/products/drafts/images', formData, {
+      headers: getAuthHeaders(token),
+    })
+      .then(async () => {
+        await loadDraft()
+        setHasGenerated(false)
+      })
+      .catch((error) => {
+        if (error instanceof ApiError && error.status === 401) {
+          clearMerchantSession()
+          navigate('/merchant/auth', { replace: true })
+          return
+        }
+        showToast(error instanceof ApiError ? error.message : '图片上传失败')
+      })
+      .finally(() => setIsUploading(false))
   }
 
-  function removePreview(id: string) {
-    setPreviews((current) => {
-      const target = current.find((preview) => preview.id === id)
-      if (target) URL.revokeObjectURL(target.url)
-      return current.filter((preview) => preview.id !== id)
-    })
+  async function removeImage(index: number) {
+    if (!draftData?.product || !token) return
+    try {
+      const product = await apiDelete<MerchantProduct>(
+        `/api/merchant/products/${draftData.product.id}/images/${index}`,
+        { headers: getAuthHeaders(token) },
+      )
+      await loadDraft()
+      setHasGenerated(Boolean(product.imageUrls.length > 0 && (product.title || product.summary || product.detail)))
+    } catch (error) {
+      showToast(error instanceof ApiError ? error.message : '图片删除失败')
+    }
   }
 
   async function handleGenerate() {
-    if (!data || !token || isGenerating) return
-    if (data.quota.remaining <= 0) {
-      showToast(data.merchant.tier === 'vip' ? '请下架部分商品后再发布' : '需升级VIP提升发布额度')
-      return
-    }
-    if (previews.length === 0) {
+    const product = draftData?.product
+    if (!draftData || !token || isGenerating || isUploading) return
+    if (!product || product.imageUrls.length === 0) {
       showToast('请先上传商品图片')
       return
     }
 
     setIsGenerating(true)
     const formData = new FormData()
-    previews.forEach((preview) => formData.append('images', preview.file))
+    formData.append('productId', product.id)
 
     try {
-      const product = await apiUpload<MerchantProductDraftGenerateResponse>(
+      const generatedProduct = await apiUpload<MerchantProductDraftGenerateResponse>(
         '/api/merchant/products/drafts/generate',
         formData,
         { headers: getAuthHeaders(token) },
       )
-      navigate(`/merchant/publish/edit/${product.id}`)
+      if (!generatedProduct?.id) {
+        showToast('生成结果异常，请稍后重试')
+        return
+      }
+      setDraftData((current) => (current ? { ...current, product: generatedProduct } : current))
+      setHasGenerated(true)
+      showToast('AI生成完成')
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         clearMerchantSession()
         navigate('/merchant/auth', { replace: true })
         return
       }
-      showToast(error instanceof ApiError && error.status === 400 ? '生成失败，请检查图片和发布额度' : '生成失败，请稍后重试')
+      showToast(error instanceof ApiError ? error.message : '生成失败，请稍后重试')
     } finally {
       setIsGenerating(false)
     }
   }
 
-  const isVip = data?.merchant.tier === 'vip'
-  const quota = data?.quota ?? { listedCount: 0, productLimit: isVip ? 100 : 2, remaining: 0 }
-  const disabledByQuota = data ? quota.remaining <= 0 : false
+  async function handlePublish() {
+    const product = draftData?.product
+    if (!product || !token || isPublishing) return
+    const payload: MerchantProductPublishPayload = {
+      title: product.title,
+      summary: product.summary,
+      detail: product.detail,
+      tags: product.tags,
+      priceCents: product.priceCents,
+    }
+    setIsPublishing(true)
+    try {
+      await apiPatch<MerchantProduct>(`/api/merchant/products/${product.id}/publish`, payload, {
+        headers: getAuthHeaders(token),
+      })
+      navigate('/merchant/products', { state: { refreshAt: Date.now(), message: '发布成功' } })
+    } catch (error) {
+      showToast(error instanceof ApiError ? error.message : '发布失败，请稍后重试')
+    } finally {
+      setIsPublishing(false)
+    }
+  }
+
+  const isVip = draftData?.merchant.tier === 'vip'
+  const quota = draftData?.quota ?? { listedCount: 0, productLimit: isVip ? 100 : 2, remaining: 0 }
+  const product = draftData?.product
+  const imageUrls = product?.imageUrls ?? []
+  const disabledByQuota = draftData ? quota.remaining <= 0 : false
   const quotaText = isVip ? '商家最多发布' : '免费商家最多发布'
+  const hasProductInfo = Boolean(
+    product?.title.trim() && product.summary.trim() && product.detail.trim() && product.priceCents > 0,
+  )
+  const canGenerate = Boolean(draftData && imageUrls.length > 0 && !isGenerating && !isUploading)
+  const canPublish = Boolean(draftData && product && imageUrls.length > 0 && !disabledByQuota && !isPublishing)
+  const canConfirmPublish = Boolean(canPublish && hasProductInfo)
 
   return (
     <section className="merchant-publish-page">
@@ -149,7 +217,7 @@ export function MerchantPublishPage() {
           <ChevronLeft size={31} strokeWidth={2.4} />
         </button>
         <h1>发布商品</h1>
-        <span>{isGenerating ? 'AI生成中' : ''}</span>
+        <span aria-hidden="true" />
       </header>
 
       <div className="publish-scroll">
@@ -166,28 +234,67 @@ export function MerchantPublishPage() {
                 <p>{step.description}</p>
                 {index === 0 ? (
                   <div className="publish-upload-grid">
-                    {previews.map((preview) => (
-                      <button
-                        className="publish-image-tile"
-                        key={preview.id}
-                        type="button"
-                        aria-label="移除已上传图片"
-                        onClick={() => removePreview(preview.id)}
-                      >
-                        <img src={preview.url} alt="已上传商品图片" />
-                        <small>移除</small>
-                      </button>
+                    {imageUrls.map((imageUrl, imageIndex) => (
+                      <div className="publish-image-tile" key={`${imageUrl}-${imageIndex}`}>
+                        <img src={apiAssetUrl(imageUrl)} alt="已上传商品图片" />
+                        <button
+                          type="button"
+                          aria-label="移除已上传图片"
+                          onClick={() => void removeImage(imageIndex)}
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
                     ))}
-                    {previews.length < 6 ? (
+                    {imageUrls.length < 6 ? (
                       <button
                         className="publish-add-tile"
                         type="button"
+                        disabled={isUploading}
                         onClick={() => fileInputRef.current?.click()}
                       >
                         <Plus size={34} />
                         <span>添加图片</span>
                       </button>
                     ) : null}
+                  </div>
+                ) : null}
+                {index === 1 ? (
+                  <div className="publish-step-action is-column">
+                    <button type="button" disabled={!canGenerate} onClick={() => void handleGenerate()}>
+                      <Loader2
+                        className={isGenerating ? 'is-spinning publish-generate-spinner' : 'publish-generate-spinner'}
+                        size={16}
+                      />
+                      <span>
+                        {isGenerating
+                          ? 'AI识别图片特征，生成商品信息'
+                          : hasGenerated
+                            ? '重新生成'
+                            : 'AI生成'}
+                      </span>
+                    </button>
+                    {hasGenerated && product ? (
+                      <button
+                        className="publish-result-entry"
+                        type="button"
+                        onClick={() => navigate(`/merchant/publish/result/${product.id}`)}
+                      >
+                        查看AI生成结果
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {index === 2 ? (
+                  <div className="publish-step-action">
+                    <button
+                      type="button"
+                      disabled={!product || !hasGenerated}
+                      onClick={() => product && navigate(`/merchant/publish/edit/${product.id}`)}
+                    >
+                      <Edit3 size={16} />
+                      编辑商品信息
+                    </button>
                   </div>
                 ) : null}
               </div>
@@ -203,18 +310,33 @@ export function MerchantPublishPage() {
           <em> {quota.listedCount}/{quota.productLimit} </em>件
         </p>
         <button
-          className={disabledByQuota || previews.length === 0 ? 'is-quota-disabled' : ''}
+          className={!canConfirmPublish ? 'is-quota-disabled' : ''}
           type="button"
-          disabled={!data || isGenerating}
-          onClick={() => void handleGenerate()}
+          disabled={!draftData || isGenerating || isUploading || isPublishing}
+          onClick={() => {
+            if (disabledByQuota) {
+              showToast(isVip ? '请下架部分商品后再发布' : '需升级VIP提升发布额度')
+              return
+            }
+            if (imageUrls.length === 0) {
+              showToast('请先上传商品图片')
+              return
+            }
+            if (!hasGenerated || !hasProductInfo) {
+              showToast('请先生成并完善商品信息')
+              return
+            }
+            if (!canPublish) return
+            void handlePublish()
+          }}
         >
-          {isGenerating ? (
+          {isPublishing ? (
             <>
               <Loader2 className="is-spinning" size={20} />
-              AI生成中
+              发布中...
             </>
           ) : (
-            'AI生成'
+            '确认发布'
           )}
         </button>
       </div>

@@ -12,11 +12,14 @@ import { MerchantProductsPage } from './pages/MerchantProductsPage'
 import { MerchantProfilePage } from './pages/MerchantProfilePage'
 import { MerchantPublishEditPage } from './pages/MerchantPublishEditPage'
 import { MerchantPublishPage } from './pages/MerchantPublishPage'
+import { MerchantPublishResultPage } from './pages/MerchantPublishResultPage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
+import { ProductDetailPage } from './pages/ProductDetailPage'
 import { routeGroups } from './routes'
 
 const implementedRoutes = new Set([
   '/',
+  '/products/:id',
   '/merchant/account',
   '/merchant/auth',
   '/merchant/dashboard',
@@ -28,6 +31,8 @@ const implementedRoutes = new Set([
   '/merchant/profile',
   '/merchant/publish',
   '/merchant/publish/edit/:id',
+  '/merchant/publish/result',
+  '/merchant/publish/result/:id',
 ])
 
 function App() {
@@ -35,6 +40,7 @@ function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route path="/" element={<HomePage />} />
+        <Route path="/products/:id" element={<ProductDetailPage />} />
         <Route path="/merchant/account" element={<MerchantAccountPage />} />
         <Route path="/merchant/auth" element={<MerchantAuthPage />} />
         <Route path="/merchant/dashboard" element={<MerchantDashboardPage />} />
@@ -46,6 +52,8 @@ function App() {
         <Route path="/merchant/profile" element={<MerchantProfilePage />} />
         <Route path="/merchant/publish" element={<MerchantPublishPage />} />
         <Route path="/merchant/publish/edit/:id" element={<MerchantPublishEditPage />} />
+        <Route path="/merchant/publish/result" element={<Navigate to="/merchant/publish" replace />} />
+        <Route path="/merchant/publish/result/:id" element={<MerchantPublishResultPage />} />
         {routeGroups.flatMap((group) =>
           group.routes.filter((route) => !implementedRoutes.has(route.path)).map((route) => (
             <Route

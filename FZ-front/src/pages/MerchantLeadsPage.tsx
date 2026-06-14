@@ -3,7 +3,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiGet } from '../api/client'
 import type { MerchantLeadListResponse, MerchantLeadStatus } from '../types/domain'
-import { clearMerchantSession, getAuthHeaders, readMerchantSession } from './merchantAuthStorage'
+import {
+  clearMerchantSession,
+  getAuthHeaders,
+  readMerchantSession,
+  updateMerchantSessionMerchant,
+} from './merchantAuthStorage'
 
 type LeadTab = 'all' | MerchantLeadStatus
 
@@ -43,7 +48,10 @@ export function MerchantLeadsPage() {
     apiGet<MerchantLeadListResponse>(`/api/merchant/leads?status=${activeTab}`, {
       headers: getAuthHeaders(token),
     })
-      .then(setData)
+      .then((response) => {
+        setData(response)
+        updateMerchantSessionMerchant(response.merchant)
+      })
       .catch((error) => {
         if (error instanceof ApiError && error.status === 401) {
           clearMerchantSession()

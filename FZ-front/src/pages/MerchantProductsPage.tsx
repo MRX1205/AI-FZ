@@ -1,9 +1,14 @@
 import { ChevronLeft, Edit3, Share2, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ApiError, apiDelete, apiGet } from '../api/client'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { ApiError, apiAssetUrl, apiDelete, apiGet } from '../api/client'
 import type { MerchantProduct, MerchantProductListResponse, MerchantProductStatus } from '../types/domain'
-import { clearMerchantSession, getAuthHeaders, readMerchantSession } from './merchantAuthStorage'
+import {
+  clearMerchantSession,
+  getAuthHeaders,
+  readMerchantSession,
+  updateMerchantSessionMerchant,
+} from './merchantAuthStorage'
 
 type ProductTab = 'all' | MerchantProductStatus
 
@@ -15,11 +20,7 @@ const productTabs: Array<{ key: ProductTab; label: string }> = [
 ]
 
 function formatPrice(cents: number) {
-  return new Intl.NumberFormat('zh-CN', {
-    style: 'currency',
-    currency: 'CNY',
-    maximumFractionDigits: 0,
-  }).format(cents / 100)
+  return `${Math.round(cents / 100).toLocaleString('zh-CN')}元`
 }
 
 function formatProductTime(product: MerchantProduct) {
@@ -40,12 +41,44 @@ function statusText(status: MerchantProductStatus) {
 
 export function MerchantProductsPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const token = useMemo(() => readMerchantSession()?.token ?? '', [])
+  const locationMessage = (location.state as { message?: string } | null)?.message ?? ''
   const [activeTab, setActiveTab] = useState<ProductTab>('all')
   const [data, setData] = useState<MerchantProductListResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [shareMessage, setShareMessage] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [shareMessage, setShareMessage] = useState(locationMessage)
   const [deleteTarget, setDeleteTarget] = useState<MerchantProduct | null>(null)
+  const hasLoadedRef = useRef(false)
+  const activeTabRef = useRef<ProductTab>('all')
+
+  const refreshProducts = useCallback(async (status: ProductTab = activeTabRef.current) => {
+    if (!token) return
+    if (!hasLoadedRef.current) setIsLoading(true)
+    setLoadError('')
+    try {
+      const response = await apiGet<MerchantProductListResponse>(
+        `/api/merchant/products?status=${status}&_ts=${Date.now()}`,
+        {
+          headers: getAuthHeaders(token),
+          cache: 'no-store',
+        },
+      )
+      hasLoadedRef.current = true
+      setData(response)
+      updateMerchantSessionMerchant(response.merchant)
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setLoadError(error.message)
+      } else {
+        setLoadError('商品数据加载失败')
+      }
+      throw error
+    } finally {
+      setIsLoading(false)
+    }
+  }, [token])
 
   useEffect(() => {
     if (!token) {
@@ -53,26 +86,38 @@ export function MerchantProductsPage() {
       return
     }
 
-    apiGet<MerchantProductListResponse>(`/api/merchant/products?status=${activeTab}`, {
-      headers: getAuthHeaders(token),
-    })
-      .then(setData)
-      .catch((error) => {
+    activeTabRef.current = 'all'
+    setActiveTab('all')
+    void Promise.resolve().then(() =>
+      refreshProducts('all').catch((error) => {
         if (error instanceof ApiError && error.status === 401) {
           clearMerchantSession()
           navigate('/merchant/auth', { replace: true })
         }
-      })
-      .finally(() => setIsLoading(false))
-  }, [activeTab, navigate, token])
+      }),
+    )
+  }, [location.key, navigate, refreshProducts, token])
 
-  async function refreshProducts() {
+  useEffect(() => {
     if (!token) return
-    const response = await apiGet<MerchantProductListResponse>(`/api/merchant/products?status=${activeTab}`, {
-      headers: getAuthHeaders(token),
-    })
-    setData(response)
-  }
+    const handleFocus = () => {
+      void refreshProducts(activeTabRef.current)
+    }
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [refreshProducts, token])
+
+  useEffect(() => {
+    if (!locationMessage) return
+    setShareMessage(locationMessage)
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.pathname, locationMessage, navigate])
+
+  useEffect(() => {
+    if (!shareMessage) return
+    const timer = window.setTimeout(() => setShareMessage(''), 1800)
+    return () => window.clearTimeout(timer)
+  }, [shareMessage])
 
   async function handleDelete() {
     if (!deleteTarget || !token) return
@@ -83,10 +128,17 @@ export function MerchantProductsPage() {
     await refreshProducts()
   }
 
-  const counts = data?.counts ?? { all: 0, listed: 0, draft: 0, unlisted: 0 }
   const isVip = data?.merchant.tier === 'vip'
   const hasRemaining = (data?.quota.remaining ?? 0) > 0
   const publishText = hasRemaining ? '+ 发布新商品' : isVip ? '请下架部分商品后再发布' : '升级VIP发布更多商品'
+
+  function handlePublishClick() {
+    if (hasRemaining) {
+      navigate('/merchant/publish')
+      return
+    }
+    setShareMessage(isVip ? '请下架部分商品后再发布' : '需升级VIP提升发布额度')
+  }
 
   return (
     <section className="merchant-products-page">
@@ -114,49 +166,67 @@ export function MerchantProductsPage() {
             type="button"
             onClick={() => {
               if (activeTab === tab.key) return
-              setIsLoading(true)
+              activeTabRef.current = tab.key
               setActiveTab(tab.key)
+              void refreshProducts(tab.key)
             }}
           >
-            {tab.label}({counts[tab.key]})
+            {data ? `${tab.label}(${data.counts[tab.key]})` : tab.label}
           </button>
         ))}
       </nav>
 
       <div className="products-scroll">
-        {isLoading || !data ? (
+        {loadError ? (
+          <div className="product-empty">
+            <strong>商品数据加载失败</strong>
+            <span>{loadError}</span>
+            <button type="button" onClick={() => void refreshProducts()}>
+              重新加载
+            </button>
+          </div>
+        ) : isLoading || !data ? (
           <div className="profile-loading">加载中...</div>
         ) : (
-          <ul className="product-list">
-            {data.products.map((product) => (
-              <li key={product.id}>
-                <img src={product.imageUrls[0] ?? '/mock-products/jade-1.png'} alt={product.title} />
-                <div className="product-list-main">
-                  <strong>{product.title}</strong>
-                  <em>{formatPrice(product.priceCents)}</em>
-                  <time>{formatProductTime(product)}</time>
-                </div>
-                <div className="product-list-side">
-                  <span className={`product-status product-status-${product.status}`}>
-                    {statusText(product.status)}
-                  </span>
-                  <button type="button" onClick={() => navigate(`/merchant/products/${product.id}/edit`)}>
-                    <Edit3 size={17} />
-                    编辑
-                  </button>
-                  <button className="is-danger" type="button" onClick={() => setDeleteTarget(product)}>
-                    <Trash2 size={17} />
-                    删除
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <>
+            {data.products.length === 0 ? (
+              <div className="product-empty">
+                <strong>暂无商品</strong>
+                <span>点击底部按钮发布新的翡翠商品</span>
+              </div>
+            ) : (
+              <ul className="product-list">
+                {data.products.map((product) => (
+                  <li key={product.id}>
+                    <img src={apiAssetUrl(product.imageUrls[0] ?? '/mock-products/jade-1.png')} alt={product.title} />
+                    <div className="product-list-main">
+                      <strong>{product.title}</strong>
+                      <em>{formatPrice(product.priceCents)}</em>
+                      <time>{formatProductTime(product)}</time>
+                    </div>
+                    <div className="product-list-side">
+                      <span className={`product-status product-status-${product.status}`}>
+                        {statusText(product.status)}
+                      </span>
+                      <button type="button" onClick={() => navigate(`/merchant/products/${product.id}/edit`)}>
+                        <Edit3 size={17} />
+                        编辑
+                      </button>
+                      <button className="is-danger" type="button" onClick={() => setDeleteTarget(product)}>
+                        <Trash2 size={17} />
+                        删除
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         )}
       </div>
 
       <div className="product-publish-bar">
-        <button type="button" disabled={!hasRemaining} onClick={() => navigate('/merchant/publish')}>
+        <button className={!hasRemaining ? 'is-disabled' : ''} type="button" onClick={handlePublishClick}>
           {publishText}
         </button>
       </div>

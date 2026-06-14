@@ -1,4 +1,9 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
+
+export function apiAssetUrl(path: string) {
+  if (!path.startsWith('/uploads/')) return path
+  return `${API_BASE_URL}${path}`
+}
 
 export class ApiError extends Error {
   readonly status: number
@@ -9,11 +14,21 @@ export class ApiError extends Error {
   }
 }
 
+async function errorMessage(response: Response, fallback: string) {
+  try {
+    const data = (await response.json()) as { detail?: unknown }
+    if (typeof data.detail === 'string') return data.detail
+  } catch {
+    return fallback
+  }
+  return fallback
+}
+
 export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, init)
 
   if (!response.ok) {
-    throw new ApiError(`GET ${path} failed with ${response.status}`, response.status)
+    throw new ApiError(await errorMessage(response, `GET ${path} failed with ${response.status}`), response.status)
   }
 
   return response.json() as Promise<T>
@@ -31,7 +46,7 @@ export async function apiPost<T>(path: string, body: unknown, init?: RequestInit
   })
 
   if (!response.ok) {
-    throw new ApiError(`POST ${path} failed with ${response.status}`, response.status)
+    throw new ApiError(await errorMessage(response, `POST ${path} failed with ${response.status}`), response.status)
   }
 
   return response.json() as Promise<T>
@@ -49,7 +64,7 @@ export async function apiPatch<T>(path: string, body: unknown, init?: RequestIni
   })
 
   if (!response.ok) {
-    throw new ApiError(`PATCH ${path} failed with ${response.status}`, response.status)
+    throw new ApiError(await errorMessage(response, `PATCH ${path} failed with ${response.status}`), response.status)
   }
 
   return response.json() as Promise<T>
@@ -62,7 +77,7 @@ export async function apiDelete<T>(path: string, init?: RequestInit): Promise<T>
   })
 
   if (!response.ok) {
-    throw new ApiError(`DELETE ${path} failed with ${response.status}`, response.status)
+    throw new ApiError(await errorMessage(response, `DELETE ${path} failed with ${response.status}`), response.status)
   }
 
   return response.json() as Promise<T>
@@ -76,7 +91,7 @@ export async function apiUpload<T>(path: string, body: FormData, init?: RequestI
   })
 
   if (!response.ok) {
-    throw new ApiError(`POST ${path} failed with ${response.status}`, response.status)
+    throw new ApiError(await errorMessage(response, `POST ${path} failed with ${response.status}`), response.status)
   }
 
   return response.json() as Promise<T>

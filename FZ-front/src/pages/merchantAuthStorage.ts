@@ -18,3 +18,15 @@ export function clearMerchantSession() {
 export function getAuthHeaders(token: string) {
   return { Authorization: `Bearer ${token}` }
 }
+
+export function updateMerchantSessionMerchant(merchant: MerchantAuthSession['merchant']) {
+  const current = readMerchantSession()
+  if (!current) return
+  localStorage.setItem(
+    MERCHANT_SESSION_KEY,
+    JSON.stringify({
+      ...current,
+      merchant,
+    }),
+  )
+}

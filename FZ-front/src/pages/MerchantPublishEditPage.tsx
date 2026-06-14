@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ApiError, apiGet, apiPatch } from '../api/client'
+import { ApiError, apiAssetUrl, apiGet, apiPatch } from '../api/client'
 import type { MerchantProduct, MerchantProductPublishPayload } from '../types/domain'
 import { clearMerchantSession, getAuthHeaders, readMerchantSession } from './merchantAuthStorage'
 
@@ -13,6 +13,15 @@ function centsFromYuan(value: string) {
   const numeric = Number(value.replace(/[^\d.]/g, ''))
   if (!Number.isFinite(numeric) || numeric <= 0) return 0
   return Math.round(numeric * 100)
+}
+
+function normalizeTags(tags: string[]) {
+  return tags.map((tag) => tag.trim()).filter(Boolean).slice(0, 10)
+}
+
+function sameTags(left: string[], right: string[]) {
+  if (left.length !== right.length) return false
+  return left.every((tag, index) => tag === right[index])
 }
 
 export function MerchantPublishEditPage() {
@@ -28,7 +37,7 @@ export function MerchantPublishEditPage() {
   const [editingTagIndex, setEditingTagIndex] = useState<number | null>(null)
   const [price, setPrice] = useState('')
   const [message, setMessage] = useState('')
-  const [isPublishing, setIsPublishing] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
     if (!token) {
@@ -47,6 +56,7 @@ export function MerchantPublishEditPage() {
         setDetail(response.detail)
         setTags(response.tags)
         setPrice(yuanFromCents(response.priceCents))
+        setActiveImage(0)
       })
       .catch((error) => {
         if (error instanceof ApiError && error.status === 401) {
@@ -58,41 +68,56 @@ export function MerchantPublishEditPage() {
       })
   }, [id, navigate, token])
 
-  function buildPayload(): MerchantProductPublishPayload | null {
+  const buildPayload = useCallback((showValidation = true): MerchantProductPublishPayload | null => {
     const payload = {
       title: title.trim(),
       summary: summary.trim(),
       detail: detail.trim(),
-      tags: tags.map((tag) => tag.trim()).filter(Boolean).slice(0, 10),
+      tags: normalizeTags(tags),
       priceCents: centsFromYuan(price),
     }
     if (!payload.title || !payload.summary || !payload.detail || payload.priceCents <= 0) {
-      setMessage('请完整填写商品信息和价格')
+      if (showValidation) setMessage('请完整填写商品信息和价格')
       return null
     }
     return payload
+  }, [detail, price, summary, tags, title])
+
+  function hasChanged(payload: MerchantProductPublishPayload) {
+    if (!product) return false
+    return (
+      payload.title !== product.title ||
+      payload.summary !== product.summary ||
+      payload.detail !== product.detail ||
+      payload.priceCents !== product.priceCents ||
+      !sameTags(payload.tags, product.tags)
+    )
   }
 
-  async function handlePublish() {
-    if (!product || !token || isPublishing) return
+  async function handleSave() {
+    if (!product || !token || isSaving) return
     const payload = buildPayload()
     if (!payload) return
+    if (!hasChanged(payload)) {
+      navigate('/merchant/publish')
+      return
+    }
 
-    setIsPublishing(true)
+    setIsSaving(true)
     try {
-      await apiPatch<MerchantProduct>(`/api/merchant/products/${product.id}/publish`, payload, {
+      await apiPatch<MerchantProduct>(`/api/merchant/products/${product.id}`, payload, {
         headers: getAuthHeaders(token),
       })
-      navigate('/merchant/products')
+      navigate('/merchant/publish')
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         clearMerchantSession()
         navigate('/merchant/auth', { replace: true })
         return
       }
-      setMessage(error instanceof ApiError && error.status === 400 ? '发布余额不足，请先处理额度' : '发布失败，请稍后重试')
+      setMessage(error instanceof ApiError ? error.message : '保存失败，请稍后重试')
     } finally {
-      setIsPublishing(false)
+      setIsSaving(false)
     }
   }
 
@@ -123,8 +148,10 @@ export function MerchantPublishEditPage() {
         <button type="button" aria-label="返回发布商品" onClick={() => navigate('/merchant/publish')}>
           <ChevronLeft size={31} strokeWidth={2.4} />
         </button>
-        <h1>发布商品</h1>
-        <span />
+        <h1>编辑商品信息</h1>
+        <button type="button" disabled={isSaving} onClick={() => void handleSave()}>
+          保存
+        </button>
       </header>
 
       {!product ? (
@@ -133,7 +160,7 @@ export function MerchantPublishEditPage() {
         <>
           <div className="publish-edit-scroll">
             <section className="publish-carousel" aria-label="商品图片预览">
-              <img src={imageUrls[activeImage]} alt={product.title} />
+              <img src={apiAssetUrl(imageUrls[activeImage])} alt={product.title || '商品图片'} />
               {imageCount > 1 ? (
                 <>
                   <button
@@ -167,15 +194,15 @@ export function MerchantPublishEditPage() {
             <section className="product-edit-form publish-form">
               <label>
                 商品标题 <small>（10字以内）</small>
-                <input value={title} maxLength={40} onChange={(event) => setTitle(event.target.value)} />
+                <input value={title} maxLength={10} onChange={(event) => setTitle(event.target.value)} />
               </label>
               <label>
                 商品简介 <small>（50字以内）</small>
-                <input value={summary} maxLength={80} onChange={(event) => setSummary(event.target.value)} />
+                <input value={summary} maxLength={50} onChange={(event) => setSummary(event.target.value)} />
               </label>
               <label>
                 详情 <small>（300字以内）</small>
-                <textarea value={detail} maxLength={500} onChange={(event) => setDetail(event.target.value)} />
+                <textarea value={detail} maxLength={300} onChange={(event) => setDetail(event.target.value)} />
               </label>
 
               <div className="publish-tag-section">
@@ -221,8 +248,8 @@ export function MerchantPublishEditPage() {
           </div>
 
           <div className="publish-confirm-bar">
-            <button type="button" disabled={isPublishing} onClick={() => void handlePublish()}>
-              {isPublishing ? '发布中...' : '确认发布'}
+            <button type="button" disabled={isSaving} onClick={() => void handleSave()}>
+              {isSaving ? '保存中...' : '保存'}
             </button>
           </div>
         </>

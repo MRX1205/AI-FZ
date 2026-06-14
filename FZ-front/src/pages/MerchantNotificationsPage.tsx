@@ -3,7 +3,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiGet } from '../api/client'
 import type { MerchantNotificationListResponse } from '../types/domain'
-import { clearMerchantSession, getAuthHeaders, readMerchantSession } from './merchantAuthStorage'
+import {
+  clearMerchantSession,
+  getAuthHeaders,
+  readMerchantSession,
+  updateMerchantSessionMerchant,
+} from './merchantAuthStorage'
 
 function formatNoticeTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -29,7 +34,10 @@ export function MerchantNotificationsPage() {
     apiGet<MerchantNotificationListResponse>('/api/merchant/notifications', {
       headers: getAuthHeaders(token),
     })
-      .then(setData)
+      .then((response) => {
+        setData(response)
+        updateMerchantSessionMerchant(response.merchant)
+      })
       .catch((error) => {
         if (error instanceof ApiError && error.status === 401) {
           clearMerchantSession()

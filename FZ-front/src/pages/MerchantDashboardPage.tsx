@@ -14,18 +14,12 @@ import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiGet } from '../api/client'
-import type { MerchantAuthSession, MerchantDashboardResponse, MerchantTier } from '../types/domain'
-
-const MERCHANT_SESSION_KEY = 'fz_merchant_session_v1'
-
-function readMerchantSession(): MerchantAuthSession | null {
-  try {
-    const raw = localStorage.getItem(MERCHANT_SESSION_KEY)
-    return raw ? (JSON.parse(raw) as MerchantAuthSession) : null
-  } catch {
-    return null
-  }
-}
+import type { MerchantDashboardResponse, MerchantTier } from '../types/domain'
+import {
+  clearMerchantSession,
+  readMerchantSession,
+  updateMerchantSessionMerchant,
+} from './merchantAuthStorage'
 
 function formatLeadTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -56,10 +50,11 @@ export function MerchantDashboardPage() {
     })
       .then((response) => {
         setDashboard(response)
+        updateMerchantSessionMerchant(response.merchant)
       })
       .catch((error) => {
         if (error instanceof ApiError && error.status === 401) {
-          localStorage.removeItem(MERCHANT_SESSION_KEY)
+          clearMerchantSession()
           navigate('/merchant/auth', { replace: true })
           return
         }

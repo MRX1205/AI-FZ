@@ -1,8 +1,11 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -15,9 +18,13 @@ class Settings(BaseSettings):
     sync_database_url: str
     redis_url: str
     secret_key: str
-    deepseek_api_key: str = ""
-    deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-v4-flash"
+    mimo_api_key: str = ""
+    mimo_base_url: str = "https://api.xiaomimimo.com/v1"
+    mimo_model: str = "mimo-v2.5"
+    dashscope_api_key: str = ""
+    dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    dashscope_embedding_model: str = "text-embedding-v4"
+    dashscope_embedding_dimensions: int = 1024
 
     @field_validator("backend_cors_origins", mode="before")
     @classmethod
@@ -27,7 +34,7 @@ class Settings(BaseSettings):
         return value
 
     model_config = SettingsConfigDict(
-        env_file=".env.bak.codex",
+        env_file=BACKEND_DIR / ".env.bak.codex",
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
