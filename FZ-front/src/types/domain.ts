@@ -144,6 +144,48 @@ export type MerchantProfileResponse = MerchantAuthSession['merchant'] & {
   notifications: MerchantNotificationSettings
 }
 
+export type MerchantVipPlan = {
+  title: string
+  months: number
+  amountCents: number
+}
+
+export type MerchantAccountResponse = {
+  merchant: MerchantAuthSession['merchant']
+  vipStartedAt?: string | null
+  vipExpiresAt?: string | null
+  listedCount: number
+  productLimit: number
+  todayPublished: number
+  leadAccess: string
+  priority: string
+  plans: MerchantVipPlan[]
+}
+
+export type MerchantVipOrderCreatePayload = {
+  planMonths: number
+  payChannel: 'wap' | 'page'
+}
+
+export type MerchantVipOrder = {
+  id: string
+  orderNo: string
+  planMonths: number
+  amountCents: number
+  payChannel: 'wap' | 'page'
+  status: 'pending' | 'paid' | 'closed'
+  tradeStatus?: string | null
+  alipayTradeNo?: string | null
+  paidAt?: string | null
+  grantStartedAt?: string | null
+  grantExpiresAt?: string | null
+  payUrl?: string | null
+}
+
+export type MerchantVipOrderSyncResponse = {
+  order: MerchantVipOrder
+}
+
 export type MerchantLeadStatus = 'pending' | 'contacted'
 
 export type MerchantLead = {

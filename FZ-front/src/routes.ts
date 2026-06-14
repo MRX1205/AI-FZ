@@ -34,6 +34,8 @@ export const routeGroups: RouteGroup[] = [
       { path: '/merchant/leads', title: '客资列表' },
       { path: '/merchant/leads/:id', title: '客资详情', examplePath: '/merchant/leads/demo-lead' },
       { path: '/merchant/account', title: '账户权限' },
+      { path: '/merchant/account/benefits', title: 'VIP权益' },
+      { path: '/merchant/account/payment-result', title: 'VIP支付结果' },
       { path: '/merchant/profile', title: '个人中心' },
       { path: '/merchant/notifications', title: '系统通知' },
     ],

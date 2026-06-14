@@ -3,6 +3,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urljoin
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -16,12 +17,14 @@ from app.db.session import get_db
 from app.models.auth import MerchantSession
 from app.models.lead import MerchantLead, MerchantNotification
 from app.models.merchant import Merchant
+from app.models.payment import MerchantVipOrder
 from app.models.product import MerchantProduct, MerchantProductEmbedding, MerchantProductImage
 from app.schemas.auth import AuthCodeOut
 from app.schemas.merchant import (
     DashboardLeadOut,
     DashboardMerchantOut,
     DashboardStatsOut,
+    MerchantAccountOut,
     MerchantDashboardOut,
     MerchantEmailCodeCreate,
     MerchantEmailUpdate,
@@ -40,7 +43,17 @@ from app.schemas.merchant import (
     MerchantProductQuotaOut,
     MerchantProductStatusUpdate,
     MerchantProfileOut,
+    MerchantVipOrderCreate,
+    MerchantVipOrderOut,
+    MerchantVipOrderSyncOut,
+    MerchantVipPlanOut,
     NotificationSettingsOut,
+)
+from app.services.alipay import (
+    AlipayError,
+    AlipayNotConfiguredError,
+    alipay_client,
+    append_query_params,
 )
 from app.services.embeddings import ProductEmbeddingError, embedding_client
 from app.services.merchant_membership import effective_merchant_tier_value, is_effective_vip
@@ -57,6 +70,15 @@ from app.services.supabase_otp import (
     SupabaseOtpInvalidError,
     SupabaseOtpNotConfiguredError,
     supabase_otp_client,
+)
+from app.services.vip_orders import (
+    VipOrderError,
+    amount_yuan_text,
+    mark_vip_order_closed,
+    mark_vip_order_paid,
+    vip_amount_cents,
+    vip_order_no,
+    vip_plans,
 )
 
 router = APIRouter(prefix="/merchant")
@@ -186,6 +208,85 @@ async def _refresh_product_embedding(
 
 def _product_limit(merchant: Merchant) -> int:
     return 100 if is_effective_vip(merchant) else 2
+
+
+def _merchant_lead_access(merchant: Merchant) -> str:
+    return "无限查看全部" if is_effective_vip(merchant) else "无查看权限"
+
+
+def _merchant_priority(merchant: Merchant) -> str:
+    return "高" if is_effective_vip(merchant) else "低"
+
+
+def _merchant_account_out(
+    merchant: Merchant,
+    *,
+    listed_count: int,
+    today_published: int,
+) -> MerchantAccountOut:
+    is_vip = is_effective_vip(merchant)
+    return MerchantAccountOut(
+        merchant=_dashboard_merchant_out(merchant),
+        vip_started_at=merchant.vip_started_at if is_vip else None,
+        vip_expires_at=merchant.vip_expires_at if is_vip else None,
+        listed_count=listed_count,
+        product_limit=_product_limit(merchant),
+        today_published=today_published,
+        lead_access=_merchant_lead_access(merchant),
+        priority=_merchant_priority(merchant),
+        plans=[
+            MerchantVipPlanOut(title=plan.title, months=plan.months, amount_cents=plan.amount_cents)
+            for plan in vip_plans()
+        ],
+    )
+
+
+def _vip_order_out(order: MerchantVipOrder, *, pay_url: str | None = None) -> MerchantVipOrderOut:
+    return MerchantVipOrderOut(
+        id=order.id,
+        order_no=order.order_no,
+        plan_months=order.plan_months,
+        amount_cents=order.amount_cents,
+        pay_channel=order.pay_channel,
+        status=order.status,
+        trade_status=order.trade_status,
+        alipay_trade_no=order.alipay_trade_no,
+        paid_at=order.paid_at,
+        grant_started_at=order.grant_started_at,
+        grant_expires_at=order.grant_expires_at,
+        pay_url=pay_url,
+    )
+
+
+def _frontend_public_base_url() -> str:
+    if settings.frontend_public_base_url:
+        return settings.frontend_public_base_url.rstrip("/")
+    if settings.alipay_return_url:
+        return settings.alipay_return_url.rstrip("/").rsplit(
+            "/merchant/account/payment-result",
+            1,
+        )[0]
+    raise AlipayNotConfiguredError("支付宝回跳地址未配置")
+
+
+def _backend_public_base_url() -> str:
+    if settings.backend_public_base_url:
+        return settings.backend_public_base_url.rstrip("/")
+    raise AlipayNotConfiguredError("支付宝回调公网地址未配置")
+
+
+def _alipay_notify_url() -> str:
+    if settings.alipay_notify_url:
+        return settings.alipay_notify_url
+    return urljoin(f"{_backend_public_base_url()}/", "api/payments/alipay/notify")
+
+
+def _alipay_return_url(order_id: UUID) -> str:
+    base_url = settings.alipay_return_url or urljoin(
+        f"{_frontend_public_base_url()}/",
+        "merchant/account/payment-result",
+    )
+    return append_query_params(base_url, order_id=str(order_id))
 
 
 async def _product_images(
@@ -318,6 +419,21 @@ async def _product_counts(
             remaining=max(product_limit - listed_count, 0),
         ),
     )
+
+
+async def _today_published_count(merchant: Merchant, db: AsyncSession) -> int:
+    today_start, tomorrow_start = _today_bounds_utc()
+    count = await db.scalar(
+        select(func.count())
+        .select_from(MerchantProduct)
+        .where(
+            MerchantProduct.merchant_id == merchant.id,
+            MerchantProduct.published_at.is_not(None),
+            MerchantProduct.published_at >= today_start,
+            MerchantProduct.published_at < tomorrow_start,
+        )
+    )
+    return count or 0
 
 
 async def _seed_products_if_empty(merchant: Merchant, db: AsyncSession) -> None:
@@ -629,6 +745,163 @@ async def dashboard(credentials: AuthCredentials, db: DbSession) -> MerchantDash
 async def profile(credentials: AuthCredentials, db: DbSession) -> MerchantProfileOut:
     merchant = await _get_current_merchant(credentials, db)
     return _profile_out(merchant)
+
+
+@router.get("/account", response_model=MerchantAccountOut, response_model_by_alias=True)
+async def account(credentials: AuthCredentials, db: DbSession) -> MerchantAccountOut:
+    merchant = await _get_current_merchant(credentials, db)
+    counts, _ = await _product_counts(merchant, db)
+    return _merchant_account_out(
+        merchant,
+        listed_count=counts.listed,
+        today_published=await _today_published_count(merchant, db),
+    )
+
+
+@router.post(
+    "/account/vip-orders",
+    response_model=MerchantVipOrderOut,
+    response_model_by_alias=True,
+)
+async def create_vip_order(
+    payload: MerchantVipOrderCreate,
+    credentials: AuthCredentials,
+    db: DbSession,
+) -> MerchantVipOrderOut:
+    merchant = await _get_current_merchant(credentials, db)
+    try:
+        amount_cents = vip_amount_cents(payload.plan_months)
+        order = MerchantVipOrder(
+            merchant_id=merchant.id,
+            pay_channel=payload.pay_channel,
+            order_no=vip_order_no(),
+            plan_months=payload.plan_months,
+            amount_cents=amount_cents,
+        )
+        db.add(order)
+        await db.flush()
+        subject = f"高翠网VIP会员{payload.plan_months}个月"
+        if payload.pay_channel == "wap":
+            pay_url = await alipay_client.create_wap_pay_url(
+                order_no=order.order_no,
+                amount_yuan=amount_yuan_text(order.amount_cents),
+                subject=subject,
+                notify_url=_alipay_notify_url(),
+                return_url=_alipay_return_url(order.id),
+            )
+        else:
+            pay_url = await alipay_client.create_page_pay_url(
+                order_no=order.order_no,
+                amount_yuan=amount_yuan_text(order.amount_cents),
+                subject=subject,
+                notify_url=_alipay_notify_url(),
+                return_url=_alipay_return_url(order.id),
+            )
+    except VipOrderError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    except AlipayNotConfiguredError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except AlipayError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+
+    await db.commit()
+    await db.refresh(order)
+    return _vip_order_out(order, pay_url=pay_url)
+
+
+@router.get(
+    "/account/vip-orders/{order_id}",
+    response_model=MerchantVipOrderOut,
+    response_model_by_alias=True,
+)
+async def get_vip_order(
+    order_id: UUID,
+    credentials: AuthCredentials,
+    db: DbSession,
+) -> MerchantVipOrderOut:
+    merchant = await _get_current_merchant(credentials, db)
+    result = await db.execute(
+        select(MerchantVipOrder).where(
+            MerchantVipOrder.id == order_id,
+            MerchantVipOrder.merchant_id == merchant.id,
+        )
+    )
+    order = result.scalar_one_or_none()
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="订单不存在")
+    return _vip_order_out(order)
+
+
+@router.post(
+    "/account/vip-orders/{order_id}/sync",
+    response_model=MerchantVipOrderSyncOut,
+    response_model_by_alias=True,
+)
+async def sync_vip_order(
+    order_id: UUID,
+    credentials: AuthCredentials,
+    db: DbSession,
+) -> MerchantVipOrderSyncOut:
+    merchant = await _get_current_merchant(credentials, db)
+    result = await db.execute(
+        select(MerchantVipOrder).where(
+            MerchantVipOrder.id == order_id,
+            MerchantVipOrder.merchant_id == merchant.id,
+        )
+    )
+    order = result.scalar_one_or_none()
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="订单不存在")
+    if order.status == "pending":
+        try:
+            trade = await alipay_client.query_trade(order_no=order.order_no)
+        except AlipayNotConfiguredError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(error),
+            ) from error
+        except AlipayError as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(error),
+            ) from error
+
+        if trade.status == "success" and trade.trade_status == "TRADE_SUCCESS":
+            if trade.total_amount != amount_yuan_text(order.amount_cents):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="订单金额校验失败",
+                )
+            try:
+                order = await mark_vip_order_paid(
+                    db,
+                    order_no=order.order_no,
+                    trade_status=trade.trade_status,
+                    alipay_trade_no=trade.trade_no or "",
+                    paid_at=datetime.now(UTC),
+                )
+            except VipOrderError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(error),
+                ) from error
+            await db.commit()
+            await db.refresh(order)
+        elif trade.status == "success" and trade.trade_status == "TRADE_CLOSED":
+            closed = await mark_vip_order_closed(
+                db,
+                order_no=order.order_no,
+                trade_status=trade.trade_status,
+            )
+            await db.commit()
+            if closed is not None:
+                order = closed
+                await db.refresh(order)
+
+    return MerchantVipOrderSyncOut(order=_vip_order_out(order))
 
 
 @router.post(

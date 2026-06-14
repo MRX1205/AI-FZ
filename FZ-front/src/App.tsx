@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { HomePage } from './pages/HomePage'
 import { MerchantAccountPage } from './pages/MerchantAccountPage'
+import { MerchantAccountBenefitsPage } from './pages/MerchantAccountBenefitsPage'
+import { MerchantAccountPaymentResultPage } from './pages/MerchantAccountPaymentResultPage'
 import { MerchantAuthPage } from './pages/MerchantAuthPage'
 import { MerchantDashboardPage } from './pages/MerchantDashboardPage'
 import { MerchantLeadDetailPage } from './pages/MerchantLeadDetailPage'
@@ -21,6 +23,8 @@ const implementedRoutes = new Set([
   '/',
   '/products/:id',
   '/merchant/account',
+  '/merchant/account/benefits',
+  '/merchant/account/payment-result',
   '/merchant/auth',
   '/merchant/dashboard',
   '/merchant/leads',
@@ -42,6 +46,8 @@ function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/products/:id" element={<ProductDetailPage />} />
         <Route path="/merchant/account" element={<MerchantAccountPage />} />
+        <Route path="/merchant/account/benefits" element={<MerchantAccountBenefitsPage />} />
+        <Route path="/merchant/account/payment-result" element={<MerchantAccountPaymentResultPage />} />
         <Route path="/merchant/auth" element={<MerchantAuthPage />} />
         <Route path="/merchant/dashboard" element={<MerchantDashboardPage />} />
         <Route path="/merchant/leads" element={<MerchantLeadsPage />} />

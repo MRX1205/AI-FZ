@@ -1981,7 +1981,7 @@ a {
 }
 
 .permission-table div,
-.plan-list div {
+.plan-row {
   min-height: 50px;
   display: flex;
   align-items: center;
@@ -1991,7 +1991,7 @@ a {
 }
 
 .permission-table div + div,
-.plan-list div + div {
+.plan-row + .plan-row {
   border-top: 1px solid #eef1ef;
 }
 
@@ -2017,6 +2017,43 @@ a {
   color: #121914;
   font-size: 16px;
   line-height: 1.2;
+}
+
+.plan-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-row {
+  width: 100%;
+  position: relative;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.plan-row em {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #ffffff;
+  background: var(--color-primary);
+  font-style: normal;
+}
+
+.plan-row.is-selected {
+  background: rgba(8, 122, 61, 0.06);
+}
+
+.account-message {
+  margin: 14px 0 0;
+  color: var(--color-primary-strong);
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 700;
 }
 
 .account-action {
@@ -2087,6 +2124,83 @@ a {
   background: var(--color-primary);
   font-size: 16px;
   font-weight: 800;
+}
+
+.benefit-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.benefit-grid article,
+.payment-result-card {
+  padding: 18px;
+  border: 1px solid #edf1ef;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.benefit-grid article span,
+.payment-result-card > span {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--color-primary);
+  background: rgba(8, 122, 61, 0.1);
+}
+
+.benefit-grid article strong,
+.payment-result-card strong {
+  display: block;
+  margin-top: 14px;
+  color: #121914;
+  font-size: 18px;
+  line-height: 1.3;
+  font-weight: 900;
+}
+
+.benefit-grid article p,
+.payment-result-card p,
+.payment-result-card small {
+  display: block;
+  margin: 10px 0 0;
+  color: #59645f;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.payment-result-card {
+  text-align: center;
+}
+
+.payment-result-card > span {
+  margin: 0 auto;
+}
+
+.payment-result-card.is-success > span {
+  color: var(--color-primary);
+  background: rgba(8, 122, 61, 0.1);
+}
+
+.payment-result-card.is-failed > span {
+  color: var(--color-danger);
+  background: rgba(227, 75, 75, 0.1);
+}
+
+.is-spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .leads-tabs {

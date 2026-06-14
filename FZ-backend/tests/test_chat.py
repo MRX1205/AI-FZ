@@ -21,6 +21,7 @@ client = TestClient(app)
 def setup_function() -> None:
     engine = create_engine(settings.sync_database_url)
     with engine.begin() as connection:
+        connection.execute(text("delete from merchant_vip_orders"))
         connection.execute(text("delete from chat_messages"))
         connection.execute(text("delete from visitor_need_profiles"))
         connection.execute(text("delete from chat_sessions"))

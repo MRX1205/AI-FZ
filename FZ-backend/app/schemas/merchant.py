@@ -57,6 +57,28 @@ class MerchantProfileOut(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class MerchantVipPlanOut(BaseModel):
+    title: str
+    months: int
+    amount_cents: int = Field(serialization_alias="amountCents")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MerchantAccountOut(BaseModel):
+    merchant: DashboardMerchantOut
+    vip_started_at: datetime | None = Field(default=None, serialization_alias="vipStartedAt")
+    vip_expires_at: datetime | None = Field(default=None, serialization_alias="vipExpiresAt")
+    listed_count: int = Field(serialization_alias="listedCount")
+    product_limit: int = Field(serialization_alias="productLimit")
+    today_published: int = Field(serialization_alias="todayPublished")
+    lead_access: str = Field(serialization_alias="leadAccess")
+    priority: str
+    plans: list[MerchantVipPlanOut]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class MerchantEmailCodeCreate(BaseModel):
     email: str = Field(min_length=3, max_length=320)
 
@@ -83,6 +105,43 @@ class MerchantEmailUpdate(BaseModel):
 
 class MerchantNotificationUpdate(BaseModel):
     email_notification_enabled: bool = Field(validation_alias="emailNotificationEnabled")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MerchantVipOrderCreate(BaseModel):
+    plan_months: int = Field(validation_alias="planMonths")
+    pay_channel: str = Field(validation_alias="payChannel", pattern="^(wap|page)$")
+
+    @field_validator("plan_months")
+    @classmethod
+    def validate_plan_months(cls, value: int) -> int:
+        if value not in {6, 12}:
+            raise ValueError("Invalid plan")
+        return value
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MerchantVipOrderOut(BaseModel):
+    id: UUID
+    order_no: str = Field(serialization_alias="orderNo")
+    plan_months: int = Field(serialization_alias="planMonths")
+    amount_cents: int = Field(serialization_alias="amountCents")
+    pay_channel: str = Field(serialization_alias="payChannel")
+    status: str
+    trade_status: str | None = Field(default=None, serialization_alias="tradeStatus")
+    alipay_trade_no: str | None = Field(default=None, serialization_alias="alipayTradeNo")
+    paid_at: datetime | None = Field(default=None, serialization_alias="paidAt")
+    grant_started_at: datetime | None = Field(default=None, serialization_alias="grantStartedAt")
+    grant_expires_at: datetime | None = Field(default=None, serialization_alias="grantExpiresAt")
+    pay_url: str | None = Field(default=None, serialization_alias="payUrl")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class MerchantVipOrderSyncOut(BaseModel):
+    order: MerchantVipOrderOut
 
     model_config = ConfigDict(populate_by_name=True)
 

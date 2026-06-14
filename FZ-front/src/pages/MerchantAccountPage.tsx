@@ -1,8 +1,12 @@
-import { BriefcaseBusiness, ChevronLeft, X } from 'lucide-react'
+import { BriefcaseBusiness, Check, ChevronLeft } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ApiError, apiGet } from '../api/client'
-import type { MerchantProfileResponse } from '../types/domain'
+import { ApiError, apiGet, apiPost } from '../api/client'
+import type {
+  MerchantAccountResponse,
+  MerchantVipOrder,
+  MerchantVipOrderCreatePayload,
+} from '../types/domain'
 import {
   clearMerchantSession,
   getAuthHeaders,
@@ -11,7 +15,7 @@ import {
 } from './merchantAuthStorage'
 
 function formatDate(value?: string | null) {
-  if (!value) return '2025-05-20'
+  if (!value) return '永久'
   return new Intl.DateTimeFormat('zh-CN', {
     year: 'numeric',
     month: '2-digit',
@@ -21,11 +25,22 @@ function formatDate(value?: string | null) {
     .replaceAll('/', '-')
 }
 
+function formatPrice(amountCents: number) {
+  return `￥${Math.round(amountCents / 100).toLocaleString('zh-CN')}`
+}
+
+function detectPayChannel(): 'wap' | 'page' {
+  if (typeof navigator === 'undefined') return 'page'
+  return /android/i.test(navigator.userAgent) ? 'wap' : 'page'
+}
+
 export function MerchantAccountPage() {
   const navigate = useNavigate()
   const token = useMemo(() => readMerchantSession()?.token ?? '', [])
-  const [profile, setProfile] = useState<MerchantProfileResponse | null>(null)
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [account, setAccount] = useState<MerchantAccountResponse | null>(null)
+  const [selectedMonths, setSelectedMonths] = useState<number | null>(null)
+  const [message, setMessage] = useState('')
+  const [isPaying, setIsPaying] = useState(false)
 
   useEffect(() => {
     if (!token) {
@@ -33,22 +48,56 @@ export function MerchantAccountPage() {
       return
     }
 
-    apiGet<MerchantProfileResponse>('/api/merchant/profile', {
+    apiGet<MerchantAccountResponse>('/api/merchant/account', {
       headers: getAuthHeaders(token),
     })
       .then((response) => {
-        setProfile(response)
-        updateMerchantSessionMerchant(response)
+        setAccount(response)
+        updateMerchantSessionMerchant(response.merchant)
       })
       .catch((error) => {
         if (error instanceof ApiError && error.status === 401) {
           clearMerchantSession()
           navigate('/merchant/auth', { replace: true })
+          return
         }
+        setMessage('账户信息加载失败，请稍后重试')
       })
   }, [navigate, token])
 
-  if (!profile) {
+  async function handlePay() {
+    if (!token || !account) return
+    if (!selectedMonths) {
+      setMessage('请选择充值套餐')
+      return
+    }
+
+    setIsPaying(true)
+    setMessage('')
+
+    try {
+      const payload: MerchantVipOrderCreatePayload = {
+        planMonths: selectedMonths,
+        payChannel: detectPayChannel(),
+      }
+      const response = await apiPost<MerchantVipOrder>(
+        '/api/merchant/account/vip-orders',
+        payload,
+        { headers: getAuthHeaders(token) },
+      )
+      if (!response.payUrl) {
+        setMessage('支付链接生成失败，请稍后重试')
+        setIsPaying(false)
+        return
+      }
+      window.location.assign(response.payUrl)
+    } catch (error) {
+      setIsPaying(false)
+      setMessage(error instanceof ApiError ? error.message : '发起支付失败，请稍后重试')
+    }
+  }
+
+  if (!account) {
     return (
       <section className="merchant-account-page">
         <AccountHeader isVip={false} onBack={() => navigate('/merchant/profile')} />
@@ -57,22 +106,7 @@ export function MerchantAccountPage() {
     )
   }
 
-  const isVip = profile.tier === 'vip'
-  const limits = isVip
-    ? {
-        productLimit: '100件',
-        todayPublished: '36件',
-        leadAccess: '无限查看全部',
-        priority: '高',
-        buttonText: '联系运营续费',
-      }
-    : {
-        productLimit: '2件',
-        todayPublished: '0件',
-        leadAccess: '无查看权限',
-        priority: '低',
-        buttonText: '联系运营升级',
-      }
+  const isVip = account.merchant.tier === 'vip'
 
   return (
     <section className="merchant-account-page">
@@ -85,9 +119,13 @@ export function MerchantAccountPage() {
           </span>
           <div>
             <h2>{isVip ? 'VIP会员' : '普通会员'}</h2>
-            <p>{isVip ? `有效期至 ${formatDate(profile.vipExpiresAt)}` : '有效期至 永久'}</p>
+            <p>{`有效期至 ${formatDate(account.vipExpiresAt)}`}</p>
           </div>
-          {isVip ? <button type="button">查看权益</button> : null}
+          {isVip ? (
+            <button type="button" onClick={() => navigate('/merchant/account/benefits')}>
+              查看权益
+            </button>
+          ) : null}
         </section>
 
         <section className="account-section">
@@ -95,19 +133,19 @@ export function MerchantAccountPage() {
           <dl className="permission-table">
             <div>
               <dt>商品发布上限</dt>
-              <dd>{limits.productLimit}</dd>
+              <dd>{`${account.listedCount} / ${account.productLimit} 件`}</dd>
             </div>
             <div>
               <dt>今日已发布</dt>
-              <dd>{limits.todayPublished}</dd>
+              <dd>{`${account.todayPublished} 件`}</dd>
             </div>
             <div>
               <dt>客资查看权限</dt>
-              <dd>{limits.leadAccess}</dd>
+              <dd>{account.leadAccess}</dd>
             </div>
             <div>
               <dt>优先展示权重</dt>
-              <dd>{limits.priority}</dd>
+              <dd>{account.priority}</dd>
             </div>
           </dl>
         </section>
@@ -115,36 +153,34 @@ export function MerchantAccountPage() {
         <section className="account-section">
           <h2>升级/续费</h2>
           <div className="plan-list">
-            <div>
-              <span>VIP会员（12个月）</span>
-              <strong>￥2999</strong>
-            </div>
-            <div>
-              <span>VIP会员（6个月）</span>
-              <strong>￥1688</strong>
-            </div>
+            {account.plans.map((plan) => {
+              const isSelected = selectedMonths === plan.months
+              return (
+                <button
+                  className={`plan-row ${isSelected ? 'is-selected' : ''}`}
+                  key={plan.months}
+                  type="button"
+                  onClick={() => setSelectedMonths(plan.months)}
+                >
+                  <span>{plan.title}</span>
+                  <strong>{formatPrice(plan.amountCents)}</strong>
+                  {isSelected ? (
+                    <em>
+                      <Check size={15} />
+                    </em>
+                  ) : null}
+                </button>
+              )
+            })}
           </div>
         </section>
 
-        <button className="account-action" type="button" onClick={() => setIsDialogOpen(true)}>
-          {limits.buttonText}
+        {message ? <p className="account-message">{message}</p> : null}
+
+        <button className="account-action" disabled={isPaying} type="button" onClick={() => void handlePay()}>
+          {isPaying ? '正在跳转支付...' : isVip ? '续费VIP' : '升级为VIP'}
         </button>
       </div>
-
-      {isDialogOpen ? (
-        <div className="account-dialog-backdrop" role="presentation">
-          <div className="account-dialog" role="dialog" aria-modal="true" aria-label="联系运营">
-            <button type="button" aria-label="关闭" onClick={() => setIsDialogOpen(false)}>
-              <X size={20} />
-            </button>
-            <h2>{limits.buttonText}</h2>
-            <p>请联系运营开通/续费VIP</p>
-            <button className="account-dialog-confirm" type="button" onClick={() => setIsDialogOpen(false)}>
-              确定
-            </button>
-          </div>
-        </div>
-      ) : null}
     </section>
   )
 }

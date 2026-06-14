@@ -32,6 +32,7 @@ def fake_embedding_client(monkeypatch: pytest.MonkeyPatch) -> None:
 def setup_function() -> None:
     engine = create_engine(settings.sync_database_url)
     with engine.begin() as connection:
+        connection.execute(text("delete from merchant_vip_orders"))
         connection.execute(text("delete from merchant_product_embeddings"))
         connection.execute(text("delete from merchant_notifications"))
         connection.execute(text("delete from merchant_leads"))

@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     supabase_otp_expires_seconds: int = 300
     supabase_auth_timeout_seconds: float = 10.0
     supabase_email_redirect_to: str = ""
+    alipay_app_id: str = ""
+    alipay_gateway_url: str = "https://openapi-sandbox.dl.alipaydev.com/gateway.do"
+    alipay_app_private_key_path: str = ""
+    alipay_alipay_public_key_path: str = ""
+    alipay_seller_id: str = ""
+    alipay_notify_url: str = ""
+    alipay_return_url: str = ""
+    alipay_timeout_express: str = "15m"
+    frontend_public_base_url: str = ""
+    backend_public_base_url: str = ""
 
     @field_validator("backend_cors_origins", mode="before")
     @classmethod
