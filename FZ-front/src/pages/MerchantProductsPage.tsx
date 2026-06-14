@@ -2,6 +2,7 @@ import { ChevronLeft, Edit3, Share2, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError, apiAssetUrl, apiDelete, apiGet } from '../api/client'
+import { ImagePreview } from '../components/ImagePreview'
 import type { MerchantProduct, MerchantProductListResponse, MerchantProductStatus } from '../types/domain'
 import {
   clearMerchantSession,
@@ -50,6 +51,7 @@ export function MerchantProductsPage() {
   const [loadError, setLoadError] = useState('')
   const [shareMessage, setShareMessage] = useState(locationMessage)
   const [deleteTarget, setDeleteTarget] = useState<MerchantProduct | null>(null)
+  const [previewProduct, setPreviewProduct] = useState<MerchantProduct | null>(null)
   const hasLoadedRef = useRef(false)
   const activeTabRef = useRef<ProductTab>('all')
 
@@ -87,15 +89,17 @@ export function MerchantProductsPage() {
     }
 
     activeTabRef.current = 'all'
-    setActiveTab('all')
-    void Promise.resolve().then(() =>
-      refreshProducts('all').catch((error) => {
+    void Promise.resolve()
+      .then(() => {
+        setActiveTab('all')
+        return refreshProducts('all')
+      })
+      .catch((error) => {
         if (error instanceof ApiError && error.status === 401) {
           clearMerchantSession()
           navigate('/merchant/auth', { replace: true })
         }
-      }),
-    )
+      })
   }, [location.key, navigate, refreshProducts, token])
 
   useEffect(() => {
@@ -109,8 +113,11 @@ export function MerchantProductsPage() {
 
   useEffect(() => {
     if (!locationMessage) return
-    setShareMessage(locationMessage)
-    navigate(location.pathname, { replace: true, state: null })
+    const timer = window.setTimeout(() => {
+      setShareMessage(locationMessage)
+      navigate(location.pathname, { replace: true, state: null })
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [location.pathname, locationMessage, navigate])
 
   useEffect(() => {
@@ -151,7 +158,7 @@ export function MerchantProductsPage() {
           <button
             type="button"
             aria-label="分享商品管理"
-            onClick={() => setShareMessage('分享功能暂未接入')}
+            onClick={() => setShareMessage('请选择已上架商品进入编辑页分享')}
           >
             <Share2 size={23} />
           </button>
@@ -198,7 +205,14 @@ export function MerchantProductsPage() {
               <ul className="product-list">
                 {data.products.map((product) => (
                   <li key={product.id}>
-                    <img src={apiAssetUrl(product.imageUrls[0] ?? '/mock-products/jade-1.png')} alt={product.title} />
+                    <button
+                      className="product-list-image-button"
+                      type="button"
+                      aria-label={`预览${product.title}图片`}
+                      onClick={() => setPreviewProduct(product)}
+                    >
+                      <img src={apiAssetUrl(product.imageUrls[0] ?? '/mock-products/jade-1.png')} alt={product.title} />
+                    </button>
                     <div className="product-list-main">
                       <strong>{product.title}</strong>
                       <em>{formatPrice(product.priceCents)}</em>
@@ -232,6 +246,16 @@ export function MerchantProductsPage() {
       </div>
 
       {shareMessage ? <p className="product-toast">{shareMessage}</p> : null}
+      {previewProduct ? (
+        <ImagePreview
+          images={(previewProduct.imageUrls.length ? previewProduct.imageUrls : ['/mock-products/jade-1.png']).map(
+            apiAssetUrl,
+          )}
+          initialIndex={0}
+          alt={previewProduct.title}
+          onClose={() => setPreviewProduct(null)}
+        />
+      ) : null}
       {deleteTarget ? (
         <ConfirmDialog
           title="确认删除商品"

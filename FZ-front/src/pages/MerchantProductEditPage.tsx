@@ -1,12 +1,14 @@
-import { Camera, ChevronLeft, ChevronRight, Plus, Trash2, X } from 'lucide-react'
+import { Camera, ChevronLeft, ChevronRight, Plus, Share2, Trash2, X } from 'lucide-react'
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError, apiAssetUrl, apiDelete, apiGet, apiPatch, apiUpload } from '../api/client'
+import { ImagePreview } from '../components/ImagePreview'
 import type {
   MerchantProduct,
   MerchantProductStatus,
   MerchantProductUpdatePayload,
 } from '../types/domain'
+import { shareProduct } from '../utils/productShare'
 import { clearMerchantSession, getAuthHeaders, readMerchantSession } from './merchantAuthStorage'
 
 function yuanFromCents(cents: number) {
@@ -44,6 +46,7 @@ export function MerchantProductEditPage() {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [activeImage, setActiveImage] = useState(0)
   const [isSaving, setIsSaving] = useState(false)
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null)
 
   useEffect(() => {
     if (!token) {
@@ -166,6 +169,21 @@ export function MerchantProductEditPage() {
     navigate('/merchant/products', { state: { refreshAt: Date.now() } })
   }
 
+  async function handleShare() {
+    if (!product) return
+    if (product.status !== 'listed') {
+      setMessage('商品上架后可分享')
+      return
+    }
+    try {
+      const result = await shareProduct(product)
+      if (result === 'copied') setMessage('商品链接已复制')
+      if (result === 'shared') setMessage('已打开系统分享')
+    } catch {
+      setMessage('分享失败，请稍后再试')
+    }
+  }
+
   async function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file || !product || !token) return
@@ -204,6 +222,7 @@ export function MerchantProductEditPage() {
   const nextStatus: MerchantProductStatus = product?.status === 'listed' ? 'unlisted' : 'listed'
   const statusButtonText = product?.status === 'listed' ? '下架商品' : '上架商品'
   const imageUrls = product?.imageUrls.length ? product.imageUrls : ['/mock-products/jade-1.png']
+  const resolvedImageUrls = imageUrls.map(apiAssetUrl)
   const imageCount = imageUrls.length
 
   return (
@@ -218,6 +237,11 @@ export function MerchantProductEditPage() {
             删除
           </button>
           <i aria-hidden="true" />
+          <button type="button" disabled={!product} onClick={() => void handleShare()} aria-label="分享商品">
+            <Share2 size={18} />
+            分享
+          </button>
+          <i aria-hidden="true" />
           <button type="button" disabled={isSaving} onClick={() => void handleSaveAndBack()}>
             {isSaving ? '保存中' : '保存'}
           </button>
@@ -230,7 +254,16 @@ export function MerchantProductEditPage() {
         <>
           <div className="product-edit-scroll">
             <section className="product-image-preview">
-              <img src={apiAssetUrl(imageUrls[activeImage])} alt={product.title} />
+              <img
+                src={resolvedImageUrls[activeImage]}
+                alt={product.title}
+                role="button"
+                tabIndex={0}
+                onClick={() => setPreviewIndex(activeImage)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') setPreviewIndex(activeImage)
+                }}
+              />
               {imageCount > 1 ? (
                 <>
                   <button
@@ -347,6 +380,14 @@ export function MerchantProductEditPage() {
             </div>
           </div>
         </div>
+      ) : null}
+      {previewIndex !== null ? (
+        <ImagePreview
+          images={resolvedImageUrls}
+          initialIndex={previewIndex}
+          alt={product?.title ?? '商品图片'}
+          onClose={() => setPreviewIndex(null)}
+        />
       ) : null}
     </section>
   )

@@ -2,6 +2,7 @@ import { ChevronLeft } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError, apiAssetUrl, apiGet, apiPatch } from '../api/client'
+import { ImagePreview } from '../components/ImagePreview'
 import type { MerchantAuthSession, MerchantLead } from '../types/domain'
 import {
   clearMerchantSession,
@@ -35,6 +36,7 @@ export function MerchantLeadDetailPage() {
   const [merchant, setMerchant] = useState<MerchantAuthSession['merchant'] | null>(session?.merchant ?? null)
   const [lead, setLead] = useState<MerchantLead | null>(null)
   const [message, setMessage] = useState('')
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false)
 
   useEffect(() => {
     if (!token) {
@@ -112,7 +114,9 @@ export function MerchantLeadDetailPage() {
               <div className="lead-detail-row">
                 <strong>关联商品</strong>
                 <div className="lead-product-mini">
-                  <img alt="" src={apiAssetUrl(lead.productImageUrl)} />
+                  <button type="button" aria-label="预览关联商品图片" onClick={() => setIsPreviewOpen(true)}>
+                    <img alt="" src={apiAssetUrl(lead.productImageUrl)} />
+                  </button>
                   <span>
                     <em>{lead.productTitle}</em>
                     <small>{formatPrice(lead.productPriceCents)}</small>
@@ -147,6 +151,14 @@ export function MerchantLeadDetailPage() {
               </button>
             </div>
           )}
+          {isPreviewOpen ? (
+            <ImagePreview
+              images={[apiAssetUrl(lead.productImageUrl)]}
+              initialIndex={0}
+              alt={lead.productTitle}
+              onClose={() => setIsPreviewOpen(false)}
+            />
+          ) : null}
         </>
       )}
     </section>

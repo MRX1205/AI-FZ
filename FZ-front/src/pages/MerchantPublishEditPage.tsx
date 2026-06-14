@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError, apiAssetUrl, apiGet, apiPatch } from '../api/client'
+import { ImagePreview } from '../components/ImagePreview'
 import type { MerchantProduct, MerchantProductPublishPayload } from '../types/domain'
 import { clearMerchantSession, getAuthHeaders, readMerchantSession } from './merchantAuthStorage'
 
@@ -38,6 +39,7 @@ export function MerchantPublishEditPage() {
   const [price, setPrice] = useState('')
   const [message, setMessage] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null)
 
   useEffect(() => {
     if (!token) {
@@ -140,6 +142,7 @@ export function MerchantPublishEditPage() {
   }
 
   const imageUrls = product?.imageUrls.length ? product.imageUrls : ['/mock-products/jade-1.png']
+  const resolvedImageUrls = imageUrls.map(apiAssetUrl)
   const imageCount = imageUrls.length
 
   return (
@@ -160,7 +163,16 @@ export function MerchantPublishEditPage() {
         <>
           <div className="publish-edit-scroll">
             <section className="publish-carousel" aria-label="商品图片预览">
-              <img src={apiAssetUrl(imageUrls[activeImage])} alt={product.title || '商品图片'} />
+              <img
+                src={resolvedImageUrls[activeImage]}
+                alt={product.title || '商品图片'}
+                role="button"
+                tabIndex={0}
+                onClick={() => setPreviewIndex(activeImage)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') setPreviewIndex(activeImage)
+                }}
+              />
               {imageCount > 1 ? (
                 <>
                   <button
@@ -252,6 +264,14 @@ export function MerchantPublishEditPage() {
               {isSaving ? '保存中...' : '保存'}
             </button>
           </div>
+          {previewIndex !== null ? (
+            <ImagePreview
+              images={resolvedImageUrls}
+              initialIndex={previewIndex}
+              alt={product.title || '商品图片'}
+              onClose={() => setPreviewIndex(null)}
+            />
+          ) : null}
         </>
       )}
     </section>

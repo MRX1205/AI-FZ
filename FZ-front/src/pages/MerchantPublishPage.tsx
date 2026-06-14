@@ -2,6 +2,7 @@ import { CheckCircle2, ChevronLeft, Edit3, ImagePlus, Loader2, Plus, X } from 'l
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiAssetUrl, apiDelete, apiGet, apiPatch, apiUpload } from '../api/client'
+import { ImagePreview } from '../components/ImagePreview'
 import type {
   MerchantProduct,
   MerchantProductCurrentDraftResponse,
@@ -44,6 +45,7 @@ export function MerchantPublishPage() {
   const [isUploading, setIsUploading] = useState(false)
   const [isPublishing, setIsPublishing] = useState(false)
   const [hasGenerated, setHasGenerated] = useState(false)
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null)
 
   const loadDraft = useCallback(async () => {
     const response = await apiGet<MerchantProductCurrentDraftResponse>(
@@ -201,6 +203,7 @@ export function MerchantPublishPage() {
   const quota = draftData?.quota ?? { listedCount: 0, productLimit: isVip ? 100 : 2, remaining: 0 }
   const product = draftData?.product
   const imageUrls = product?.imageUrls ?? []
+  const resolvedImageUrls = imageUrls.map(apiAssetUrl)
   const disabledByQuota = draftData ? quota.remaining <= 0 : false
   const quotaText = isVip ? '商家最多发布' : '免费商家最多发布'
   const hasProductInfo = Boolean(
@@ -236,8 +239,16 @@ export function MerchantPublishPage() {
                   <div className="publish-upload-grid">
                     {imageUrls.map((imageUrl, imageIndex) => (
                       <div className="publish-image-tile" key={`${imageUrl}-${imageIndex}`}>
-                        <img src={apiAssetUrl(imageUrl)} alt="已上传商品图片" />
                         <button
+                          className="publish-image-preview-button"
+                          type="button"
+                          aria-label={`预览第${imageIndex + 1}张商品图片`}
+                          onClick={() => setPreviewIndex(imageIndex)}
+                        >
+                          <img src={resolvedImageUrls[imageIndex]} alt="已上传商品图片" />
+                        </button>
+                        <button
+                          className="publish-image-remove-button"
                           type="button"
                           aria-label="移除已上传图片"
                           onClick={() => void removeImage(imageIndex)}
@@ -350,6 +361,14 @@ export function MerchantPublishPage() {
         onChange={(event) => handleFileChange(event)}
       />
       {toast ? <p className="product-toast">{toast}</p> : null}
+      {previewIndex !== null ? (
+        <ImagePreview
+          images={resolvedImageUrls}
+          initialIndex={previewIndex}
+          alt="已上传商品图片"
+          onClose={() => setPreviewIndex(null)}
+        />
+      ) : null}
     </section>
   )
 }

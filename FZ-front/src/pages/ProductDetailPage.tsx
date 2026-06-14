@@ -1,12 +1,14 @@
-import { ChevronLeft, Mail, Share2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Mail, Share2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError, apiAssetUrl, apiGet, apiPost } from '../api/client'
+import { ImagePreview } from '../components/ImagePreview'
 import type {
   PublicProduct,
   PublicProductContactPayload,
   PublicProductContactResponse,
 } from '../types/domain'
+import { shareProduct } from '../utils/productShare'
 
 function formatPrice(priceCents: number) {
   return `￥${Math.round(priceCents / 100).toLocaleString('zh-CN')}`
@@ -25,6 +27,7 @@ export function ProductDetailPage() {
   const [message, setMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [loadError, setLoadError] = useState('')
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null)
 
   const imageUrls = useMemo(() => {
     const urls = product?.imageUrls?.length ? product.imageUrls : ['/mock-products/jade-1.png']
@@ -68,6 +71,17 @@ export function ProductDetailPage() {
     }
   }
 
+  async function handleShare() {
+    if (!product) return
+    try {
+      const result = await shareProduct(product)
+      if (result === 'copied') setMessage('商品链接已复制')
+      if (result === 'shared') setMessage('已打开系统分享')
+    } catch {
+      setMessage('分享失败，请稍后再试')
+    }
+  }
+
   return (
     <section className="public-product-page">
       <header className="public-product-header">
@@ -75,7 +89,7 @@ export function ProductDetailPage() {
           <ChevronLeft size={32} strokeWidth={2.4} />
         </button>
         <h1>商品详情</h1>
-        <button type="button" aria-label="分享商品" onClick={() => setMessage('分享功能暂未接入')}>
+        <button type="button" aria-label="分享商品" onClick={() => void handleShare()}>
           <Share2 size={25} strokeWidth={2.3} />
         </button>
       </header>
@@ -94,7 +108,34 @@ export function ProductDetailPage() {
       ) : (
         <div className="public-product-scroll">
           <section className="public-product-gallery">
-            <img src={heroImage} alt={product.title} />
+            <button
+              className="public-product-image-button"
+              type="button"
+              aria-label="预览商品图片"
+              onClick={() => setPreviewIndex(activeImage)}
+            >
+              <img src={heroImage} alt={product.title} />
+            </button>
+            {imageUrls.length > 1 ? (
+              <>
+                <button
+                  className="public-product-nav public-product-prev"
+                  type="button"
+                  aria-label="上一张图片"
+                  onClick={() => setActiveImage((current) => (current - 1 + imageUrls.length) % imageUrls.length)}
+                >
+                  <ChevronLeft size={24} />
+                </button>
+                <button
+                  className="public-product-nav public-product-next"
+                  type="button"
+                  aria-label="下一张图片"
+                  onClick={() => setActiveImage((current) => (current + 1) % imageUrls.length)}
+                >
+                  <ChevronRight size={24} />
+                </button>
+              </>
+            ) : null}
             <span className="public-product-count">
               {activeImage + 1}/{imageUrls.length}
             </span>
@@ -102,7 +143,7 @@ export function ProductDetailPage() {
               {imageUrls.map((imageUrl, index) => (
                 <button
                   className={activeImage === index ? 'is-active' : ''}
-                  key={imageUrl}
+                  key={`${imageUrl}-${index}`}
                   type="button"
                   aria-label={`查看第${index + 1}张图片`}
                   onClick={() => setActiveImage(index)}
@@ -166,6 +207,14 @@ export function ProductDetailPage() {
           </section>
         </div>
       )}
+      {previewIndex !== null ? (
+        <ImagePreview
+          images={imageUrls}
+          initialIndex={previewIndex}
+          alt={product?.title ?? '商品图片'}
+          onClose={() => setPreviewIndex(null)}
+        />
+      ) : null}
     </section>
   )
 }

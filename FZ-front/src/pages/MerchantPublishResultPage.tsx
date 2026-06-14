@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError, apiAssetUrl, apiGet, apiUpload } from '../api/client'
+import { ImagePreview } from '../components/ImagePreview'
 import type { MerchantProduct, MerchantProductDraftGenerateResponse } from '../types/domain'
 import { clearMerchantSession, getAuthHeaders, readMerchantSession } from './merchantAuthStorage'
 
@@ -19,6 +20,7 @@ export function MerchantPublishResultPage() {
   const [message, setMessage] = useState('')
   const [loadError, setLoadError] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null)
 
   const hydrateProduct = useCallback((response: MerchantProduct) => {
     setProduct(response)
@@ -83,6 +85,7 @@ export function MerchantPublishResultPage() {
   }
 
   const imageUrls = product?.imageUrls?.length ? product.imageUrls : ['/mock-products/jade-1.png']
+  const resolvedImageUrls = imageUrls.map(apiAssetUrl)
   const imageCount = imageUrls.length
 
   return (
@@ -114,7 +117,16 @@ export function MerchantPublishResultPage() {
       ) : (
         <div className="publish-result-scroll">
           <section className="publish-carousel publish-result-carousel" aria-label="商品图片预览">
-            <img src={apiAssetUrl(imageUrls[activeImage])} alt={product.title || '商品图片'} />
+            <img
+              src={resolvedImageUrls[activeImage]}
+              alt={product.title || '商品图片'}
+              role="button"
+              tabIndex={0}
+              onClick={() => setPreviewIndex(activeImage)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') setPreviewIndex(activeImage)
+              }}
+            />
             {imageCount > 1 ? (
               <>
                 <button
@@ -173,6 +185,14 @@ export function MerchantPublishResultPage() {
           {message ? <p className="product-edit-message">{message}</p> : null}
         </div>
       )}
+      {previewIndex !== null ? (
+        <ImagePreview
+          images={resolvedImageUrls}
+          initialIndex={previewIndex}
+          alt={product?.title || '商品图片'}
+          onClose={() => setPreviewIndex(null)}
+        />
+      ) : null}
     </section>
   )
 }
