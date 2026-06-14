@@ -15,10 +15,38 @@ class ProductCard(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class VisitorNeedTagOut(BaseModel):
+    name: str
+    score: int
+
+
+class VisitorNeedParamOut(BaseModel):
+    category: str
+    value: str
+
+
+class VisitorNeedProfileOut(BaseModel):
+    id: UUID
+    source_type: str = Field(serialization_alias="sourceType")
+    original_question: str = Field(serialization_alias="originalQuestion")
+    normalized_question: str = Field(serialization_alias="normalizedQuestion")
+    title: str
+    summary: str
+    detail: str
+    tags: list[VisitorNeedTagOut]
+    params: list[VisitorNeedParamOut]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class ChatMessageOut(BaseModel):
     id: UUID
     role: str
     content: str
+    need_profile: VisitorNeedProfileOut | None = Field(
+        default=None,
+        serialization_alias="needProfile",
+    )
     matched_products: list[ProductCard] | None = Field(
         default=None,
         serialization_alias="matchedProducts",

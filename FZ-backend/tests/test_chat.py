@@ -7,7 +7,13 @@ from app.core.config import settings
 from app.main import app
 from app.services.embeddings import EmbeddingResult, ProductEmbeddingError, embedding_client
 from app.services.jade_agent import JadeAgentResult, jade_agent
-from app.services.visitor_product_matcher import looks_like_product_need, parse_visitor_need
+from app.services.visitor_product_matcher import (
+    RewrittenNeed,
+    looks_like_product_need,
+    parse_visitor_need,
+    visitor_need_rewrite_agent,
+    visitor_need_visible_reply_agent,
+)
 
 client = TestClient(app)
 
@@ -16,6 +22,7 @@ def setup_function() -> None:
     engine = create_engine(settings.sync_database_url)
     with engine.begin() as connection:
         connection.execute(text("delete from chat_messages"))
+        connection.execute(text("delete from visitor_need_profiles"))
         connection.execute(text("delete from chat_sessions"))
         connection.execute(text("delete from merchant_product_embeddings"))
         connection.execute(text("delete from merchant_notifications"))
@@ -111,6 +118,20 @@ async def fake_embed_document(text: str, timeout_seconds: float = 30) -> Embeddi
     )
 
 
+async def fake_visible_reply(**kwargs: object) -> str:
+    original_question = str(kwargs["original_question"])
+    has_products = bool(kwargs["has_products"])
+    if has_products:
+        return (
+            "您好！我是高翠AI，很高兴为您服务。"
+            f"已按「{original_question}」为您推荐商品卡片。"
+        )
+    return (
+        "您好！我是高翠AI，很高兴为您服务。"
+        f"已按「{original_question}」为您查找，暂未找到合适货源。"
+    )
+
+
 def create_session() -> str:
     response = client.post(
         "/api/chat/sessions",
@@ -128,6 +149,7 @@ def test_parse_visitor_need_extracts_budget_category_and_color() -> None:
     assert "帝王绿" in need.colors
     assert "预算：100000元" in need.search_text
     assert looks_like_product_need("10万预算 帝王绿手镯")
+    assert looks_like_product_need("我要A货，没预算上限")
     assert not looks_like_product_need("你好，今天可以介绍一下平台吗")
 
 
@@ -153,6 +175,12 @@ def test_chat_messages_keep_mimo_text_reply(monkeypatch) -> None:
 
 def test_chat_matches_endpoint_matches_listed_products_with_embedding(monkeypatch) -> None:
     monkeypatch.setattr(embedding_client, "embed_document", fake_embed_document)
+    monkeypatch.setattr(visitor_need_visible_reply_agent, "generate", fake_visible_reply)
+
+    async def fail_rewrite(content: str) -> str:
+        raise AssertionError("翡翠需求不应该调用 MiMo 改写")
+
+    monkeypatch.setattr(visitor_need_rewrite_agent, "rewrite", fail_rewrite)
     hand_product_id = seed_product(
         email="hand@example.com",
         title="帝王绿手镯",
@@ -182,7 +210,16 @@ def test_chat_matches_endpoint_matches_listed_products_with_embedding(monkeypatc
     products = data["assistantMessage"]["matchedProducts"]
     assert data["userMessage"]["role"] == "user"
     assert data["assistantMessage"]["role"] == "assistant"
-    assert data["assistantMessage"]["content"] == "已根据预算、品类和商品特征为您匹配相近货源。"
+    need_profile = data["assistantMessage"]["needProfile"]
+    assert "您好！我是高翠AI" in data["assistantMessage"]["content"]
+    assert "10万预算 帝王绿手镯" in data["assistantMessage"]["content"]
+    assert need_profile["sourceType"] == "direct"
+    assert need_profile["title"] == "帝王绿手镯"
+    assert len(need_profile["tags"]) == 10
+    assert any(
+        item["category"] == "产品品类" and item["value"] == "手镯"
+        for item in need_profile["params"]
+    )
     assert len(products) == 1
     assert products[0]["id"] == hand_product_id
     assert products[0]["merchantTier"] == "vip"
@@ -191,6 +228,53 @@ def test_chat_matches_endpoint_matches_listed_products_with_embedding(monkeypatc
     assert history_response.status_code == 200
     assert len(history_response.json()["messages"]) == 2
     assert history_response.json()["messages"][1]["matchedProducts"][0]["id"] == hand_product_id
+    assert history_response.json()["messages"][1]["needProfile"]["id"] == need_profile["id"]
+
+    engine = create_engine(settings.sync_database_url)
+    with engine.begin() as connection:
+        profile_count = connection.execute(
+            text("select count(*) from visitor_need_profiles where session_id = :session_id"),
+            {"session_id": session_id},
+        ).scalar_one()
+    assert profile_count == 1
+
+
+def test_chat_matches_endpoint_rewrites_non_jade_need_before_matching(monkeypatch) -> None:
+    monkeypatch.setattr(embedding_client, "embed_document", fake_embed_document)
+    monkeypatch.setattr(visitor_need_visible_reply_agent, "generate", fake_visible_reply)
+
+    async def fake_rewrite(content: str) -> RewrittenNeed:
+        assert content == "生日送什么好"
+        return RewrittenNeed(normalized_question="预算不限 适合生日送礼的翡翠平安扣")
+
+    monkeypatch.setattr(visitor_need_rewrite_agent, "rewrite", fake_rewrite)
+    product_id = seed_product(
+        email="rewrite@example.com",
+        title="冰种平安扣",
+        tags=["冰种", "平安扣", "送礼"],
+        price_cents=20_000_00,
+        match_params={"category": "平安扣", "color": "晴底", "water": "冰种"},
+        embedding=[0.2] * 1024,
+    )
+    session_id = create_session()
+
+    response = client.post(
+        f"/api/chat/sessions/{session_id}/matches",
+        json={"content": "生日送什么好"},
+    )
+
+    assert response.status_code == 200
+    assistant_message = response.json()["assistantMessage"]
+    assert "您好！我是高翠AI" in assistant_message["content"]
+    assert "生日送什么好" in assistant_message["content"]
+    assert "预算不限 适合生日送礼的翡翠平安扣" not in assistant_message["content"]
+    assert assistant_message["needProfile"]["sourceType"] == "rewritten"
+    assert assistant_message["needProfile"]["originalQuestion"] == "生日送什么好"
+    assert (
+        assistant_message["needProfile"]["normalizedQuestion"]
+        == "预算不限 适合生日送礼的翡翠平安扣"
+    )
+    assert assistant_message["matchedProducts"][0]["id"] == product_id
 
 
 def test_chat_matches_endpoint_falls_back_to_rule_search_when_embedding_fails(monkeypatch) -> None:
@@ -198,6 +282,7 @@ def test_chat_matches_endpoint_falls_back_to_rule_search_when_embedding_fails(mo
         raise ProductEmbeddingError("timeout")
 
     monkeypatch.setattr(embedding_client, "embed_document", fail_embed_document)
+    monkeypatch.setattr(visitor_need_visible_reply_agent, "generate", fake_visible_reply)
     product_id = seed_product(
         email="fallback@example.com",
         title="冰种平安扣",
@@ -214,12 +299,15 @@ def test_chat_matches_endpoint_falls_back_to_rule_search_when_embedding_fails(mo
 
     assert response.status_code == 200
     assistant_message = response.json()["assistantMessage"]
-    assert assistant_message["content"] == "暂未找到完全匹配货源，先为您推荐相近商品。"
+    assert "您好！我是高翠AI" in assistant_message["content"]
+    assert "冰种平安扣 预算2万 无纹无裂" in assistant_message["content"]
+    assert assistant_message["needProfile"]["sourceType"] == "direct"
     assert assistant_message["matchedProducts"][0]["id"] == product_id
 
 
 def test_chat_matches_endpoint_returns_empty_matches_when_no_listed_products(monkeypatch) -> None:
     monkeypatch.setattr(embedding_client, "embed_document", fake_embed_document)
+    monkeypatch.setattr(visitor_need_visible_reply_agent, "generate", fake_visible_reply)
     session_id = create_session()
 
     response = client.post(
@@ -229,5 +317,7 @@ def test_chat_matches_endpoint_returns_empty_matches_when_no_listed_products(mon
 
     assert response.status_code == 200
     assistant_message = response.json()["assistantMessage"]
-    assert assistant_message["content"] == "暂未找到合适货源，建议补充预算、品类或尺寸。"
+    assert "您好！我是高翠AI" in assistant_message["content"]
+    assert "暂未找到合适货源" in assistant_message["content"]
+    assert assistant_message["needProfile"]["title"]
     assert assistant_message["matchedProducts"] == []

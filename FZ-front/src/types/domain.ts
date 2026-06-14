@@ -25,6 +25,28 @@ export type ProductCard = {
   merchantTier: MerchantTier
 }
 
+export type VisitorNeedTag = {
+  name: string
+  score: number
+}
+
+export type VisitorNeedParam = {
+  category: string
+  value: string
+}
+
+export type VisitorNeedProfile = {
+  id: string
+  sourceType: 'direct' | 'rewritten'
+  originalQuestion: string
+  normalizedQuestion: string
+  title: string
+  summary: string
+  detail: string
+  tags: VisitorNeedTag[]
+  params: VisitorNeedParam[]
+}
+
 export type PublicProduct = {
   id: string
   title: string
@@ -62,6 +84,7 @@ export type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
   content: string
+  needProfile?: VisitorNeedProfile | null
   matchedProducts?: ProductCard[] | null
   createdAt: string
 }

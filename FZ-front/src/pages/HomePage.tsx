@@ -1,8 +1,13 @@
 import { Bot, Gem, SendHorizontal, Sparkles, UserRound } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ApiError, apiAssetUrl, apiGet, apiPost } from '../api/client'
-import type { ChatMessage, ChatMessagePairResponse, ChatSessionResponse, ProductCard } from '../types/domain'
+import { API_BASE_URL, ApiError, apiAssetUrl, apiGet, apiPost } from '../api/client'
+import type {
+  ChatMessage,
+  ChatMessagePairResponse,
+  ChatSessionResponse,
+  ProductCard,
+} from '../types/domain'
 
 const STORAGE_SESSION_ID = 'fz_home_chat_session_id_v1'
 const STORAGE_MESSAGES = 'fz_home_chat_messages_v1'
@@ -18,34 +23,11 @@ const SUGGESTIONS = [
   '冰种平安扣 预算2万 无纹无裂',
   '冰种翡翠吊坠 送礼自用均可',
 ]
-const PRODUCT_NEED_TERMS = [
-  '预算',
-  '万',
-  'w',
-  'W',
-  '手镯',
-  '镯子',
-  '吊坠',
-  '挂件',
-  '平安扣',
-  '戒面',
-  '蛋面',
-  '珠串',
-  '手串',
-  '翡翠',
-  '帝王绿',
-  '阳绿',
-  '冰种',
-  '糯冰',
-  '糯种',
-  '飘花',
-  '晴底',
-  '紫罗兰',
-  '无纹',
-  '无裂',
-  '证书',
-]
-const PRODUCT_NEED_INTENTS = ['找', '想要', '需要', '有没有', '推荐', '匹配', '预算', '买', '购买', '货源', '求']
+
+type StreamEvent = {
+  event: string
+  data: unknown
+}
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -77,14 +59,89 @@ function formatTime(value: string) {
   }).format(new Date(value))
 }
 
-function looksLikeProductNeed(content: string) {
-  const text = content.trim()
-  if (!text) return false
-  const termHits = PRODUCT_NEED_TERMS.reduce((count, term) => count + (text.includes(term) ? 1 : 0), 0)
-  const hasBudget = /\d+\s*(万|w|W|千|k|K|元)|预算/.test(text)
-  const hasCategory = /手镯|镯子|吊坠|挂件|平安扣|戒面|蛋面|珠串|手串/.test(text)
-  const hasIntent = PRODUCT_NEED_INTENTS.some((term) => text.includes(term))
-  return (hasBudget && termHits >= 1) || (hasCategory && (termHits >= 2 || hasIntent))
+function tempMessage(role: ChatMessage['role'], content: string): ChatMessage {
+  return {
+    id: `temp-${crypto.randomUUID()}`,
+    role,
+    content,
+    createdAt: new Date().toISOString(),
+  }
+}
+
+function parseStreamEvent(rawEvent: string): StreamEvent | null {
+  const lines = rawEvent.split('\n')
+  const eventLine = lines.find((line) => line.startsWith('event:'))
+  const dataLines = lines.filter((line) => line.startsWith('data:'))
+  if (!eventLine || dataLines.length === 0) return null
+
+  const event = eventLine.replace(/^event:\s*/, '').trim()
+  const dataText = dataLines.map((line) => line.replace(/^data:\s*/, '')).join('\n')
+  try {
+    return { event, data: JSON.parse(dataText) as unknown }
+  } catch {
+    return null
+  }
+}
+
+async function postChatMessageStream({
+  sessionId,
+  content,
+  onDelta,
+  onResult,
+}: {
+  sessionId: string
+  content: string
+  onDelta: (content: string) => void
+  onResult: (response: ChatMessagePairResponse) => void
+}) {
+  const response = await fetch(`${API_BASE_URL}/api/chat/sessions/${sessionId}/matches/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }),
+  })
+
+  if (!response.ok) {
+    throw new ApiError(`POST /matches/stream failed with ${response.status}`, response.status)
+  }
+  if (!response.body) {
+    throw new ApiError('当前浏览器不支持流式响应', response.status)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  function dispatch(rawEvent: string) {
+    const parsed = parseStreamEvent(rawEvent.trim())
+    if (!parsed) return
+    if (parsed.event === 'message_delta') {
+      const data = parsed.data as { content?: unknown }
+      if (typeof data.content === 'string') onDelta(data.content)
+      return
+    }
+    if (parsed.event === 'match_result') {
+      onResult(parsed.data as ChatMessagePairResponse)
+      return
+    }
+    if (parsed.event === 'error') {
+      const data = parsed.data as { message?: unknown }
+      throw new ApiError(typeof data.message === 'string' ? data.message : '匹配失败', 500)
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let separatorIndex = buffer.indexOf('\n\n')
+    while (separatorIndex >= 0) {
+      const rawEvent = buffer.slice(0, separatorIndex)
+      buffer = buffer.slice(separatorIndex + 2)
+      dispatch(rawEvent)
+      separatorIndex = buffer.indexOf('\n\n')
+    }
+  }
+  if (buffer.trim()) dispatch(buffer)
 }
 
 export function HomePage() {
@@ -108,7 +165,6 @@ export function HomePage() {
   const [inputValue, setInputValue] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [isComposing, setIsComposing] = useState(false)
-  const [sendingMode, setSendingMode] = useState<'match' | 'chat'>('chat')
 
   const canSend = inputValue.trim().length > 0 && !isSending && !isComposing
   const hasMessages = messages.length > 0
@@ -162,39 +218,68 @@ export function HomePage() {
     return createSession()
   }
 
-  async function postChatMessage(activeSessionId: string, content: string, isProductNeed: boolean) {
-    const path = isProductNeed
-      ? `/api/chat/sessions/${activeSessionId}/matches`
-      : `/api/chat/sessions/${activeSessionId}/messages`
-    return apiPost<ChatMessagePairResponse>(path, {
-      content,
-    })
-  }
-
   async function sendMessage(content: string) {
     const trimmedContent = content.trim()
     if (!trimmedContent || isSending) return
 
-    const isProductNeed = looksLikeProductNeed(trimmedContent)
-    setSendingMode(isProductNeed ? 'match' : 'chat')
     setIsSending(true)
     setInputValue('')
 
+    const userPlaceholder = tempMessage('user', trimmedContent)
+    const assistantPlaceholder = tempMessage('assistant', '')
+    const appendDelta = (delta: string) => {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantPlaceholder.id
+            ? { ...message, content: `${message.content}${delta}` }
+            : message,
+        ),
+      )
+    }
+    const replaceWithResult = (response: ChatMessagePairResponse) => {
+      setMessages((current) =>
+        current.map((message) => {
+          if (message.id === userPlaceholder.id) return response.userMessage
+          if (message.id === assistantPlaceholder.id) return response.assistantMessage
+          return message
+        }),
+      )
+    }
+
     try {
       const activeSessionId = await ensureSession()
-      let response: ChatMessagePairResponse
+      setMessages((current) => [...current, userPlaceholder, assistantPlaceholder])
 
       try {
-        response = await postChatMessage(activeSessionId, trimmedContent, isProductNeed)
+        await postChatMessageStream({
+          sessionId: activeSessionId,
+          content: trimmedContent,
+          onDelta: appendDelta,
+          onResult: replaceWithResult,
+        })
       } catch (error) {
         if (!(error instanceof ApiError) || error.status !== 404) throw error
 
         localStorage.removeItem(STORAGE_SESSION_ID)
         const newSessionId = await createSession()
-        response = await postChatMessage(newSessionId, trimmedContent, isProductNeed)
+        await postChatMessageStream({
+          sessionId: newSessionId,
+          content: trimmedContent,
+          onDelta: appendDelta,
+          onResult: replaceWithResult,
+        })
       }
-
-      setMessages((current) => [...current, response.userMessage, response.assistantMessage])
+    } catch (error) {
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantPlaceholder.id
+            ? {
+                ...message,
+                content: error instanceof ApiError ? error.message : '匹配失败，请稍后再试。',
+              }
+            : message,
+        ),
+      )
     } finally {
       setIsSending(false)
     }
@@ -257,7 +342,7 @@ export function HomePage() {
           />
           <button className="send-button" type="submit" disabled={!canSend}>
             <SendHorizontal size={18} strokeWidth={2.4} />
-            {isSending ? (sendingMode === 'match' ? '正在匹配货源...' : '正在回复...') : 'AI匹配'}
+            {isSending ? '正在匹配货源...' : 'AI匹配'}
           </button>
         </div>
         <p className="composer-note">AI智能匹配，仅供参考，不做鉴定与交易</p>
