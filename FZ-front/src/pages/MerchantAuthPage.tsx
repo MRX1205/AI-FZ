@@ -4,8 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiPost } from '../api/client'
 import type { AuthCodeResponse, MerchantAuthSession } from '../types/domain'
-
-const MERCHANT_SESSION_KEY = 'fz_merchant_session_v1'
+import { saveMerchantSession } from './merchantAuthStorage'
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
@@ -67,7 +66,7 @@ export function MerchantAuthPage() {
         code: code.trim(),
       })
       // 首页和后续后台页都通过这个本地登录态判断商家是否已登录。
-      localStorage.setItem(MERCHANT_SESSION_KEY, JSON.stringify(session))
+      saveMerchantSession(session)
       navigate('/merchant/dashboard')
     } catch {
       setMessage('验证码错误或已过期，请重新获取')

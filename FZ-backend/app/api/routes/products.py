@@ -8,13 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.lead import MerchantLead, MerchantNotification
-from app.models.merchant import Merchant, MerchantTier
+from app.models.merchant import Merchant
 from app.models.product import MerchantProduct, MerchantProductImage
 from app.schemas.public_product import (
     PublicProductContactCreate,
     PublicProductContactOut,
     PublicProductOut,
 )
+from app.services.merchant_membership import effective_merchant_tier_value
 
 router = APIRouter(prefix="/products")
 DbSession = Annotated[AsyncSession, Depends(get_db)]
@@ -42,7 +43,6 @@ async def _listed_product_or_404(product_id: UUID, db: AsyncSession) -> Merchant
 
 async def _public_product_out(product: MerchantProduct, db: AsyncSession) -> PublicProductOut:
     merchant = await db.get(Merchant, product.merchant_id)
-    merchant_tier = merchant.tier.value if merchant else MerchantTier.free.value
     return PublicProductOut(
         id=product.id,
         title=product.title,
@@ -51,7 +51,7 @@ async def _public_product_out(product: MerchantProduct, db: AsyncSession) -> Pub
         tags=product.tags,
         price_cents=product.price_cents,
         image_urls=await _product_image_urls(product, db),
-        merchant_tier=merchant_tier,
+        merchant_tier=effective_merchant_tier_value(merchant),
         created_at=product.created_at,
         updated_at=product.updated_at,
     )

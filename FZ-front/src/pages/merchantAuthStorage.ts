@@ -15,6 +15,10 @@ export function clearMerchantSession() {
   localStorage.removeItem(MERCHANT_SESSION_KEY)
 }
 
+export function saveMerchantSession(session: MerchantAuthSession) {
+  localStorage.setItem(MERCHANT_SESSION_KEY, JSON.stringify(session))
+}
+
 export function getAuthHeaders(token: string) {
   return { Authorization: `Bearer ${token}` }
 }

@@ -9,11 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.chat import VisitorNeedProfile
-from app.models.merchant import Merchant, MerchantTier
+from app.models.merchant import Merchant
 from app.models.product import MerchantProduct, MerchantProductEmbedding, MerchantProductImage
 from app.schemas.chat import ProductCard
 from app.services.embeddings import ProductEmbeddingError, embedding_client
 from app.services.jade_agent import MimoCompletionError, jade_agent
+from app.services.merchant_membership import effective_merchant_tier_value
 
 MAX_MATCHES = 3
 VECTOR_CANDIDATE_LIMIT = 50
@@ -806,7 +807,7 @@ async def _vector_candidates(need: VisitorNeed, db: AsyncSession) -> list[Produc
 
     distance = MerchantProductEmbedding.embedding.cosine_distance(embedding)
     statement = (
-        select(MerchantProduct, Merchant.tier, distance.label("distance"))
+        select(MerchantProduct, Merchant, distance.label("distance"))
         .join(MerchantProductEmbedding, MerchantProductEmbedding.product_id == MerchantProduct.id)
         .join(Merchant, Merchant.id == MerchantProduct.merchant_id)
         .where(MerchantProduct.status == "listed")
@@ -820,11 +821,11 @@ async def _vector_candidates(need: VisitorNeed, db: AsyncSession) -> list[Produc
     return [
         ProductCandidate(
             product=product,
-            merchant_tier=str(tier.value if isinstance(tier, MerchantTier) else tier),
+            merchant_tier=effective_merchant_tier_value(merchant),
             image_url=image_urls.get(product.id) or _legacy_image_url(product),
             vector_distance=float(distance_value) if distance_value is not None else None,
         )
-        for product, tier, distance_value in rows
+        for product, merchant, distance_value in rows
     ]
 
 
@@ -841,7 +842,7 @@ async def _query_embedding(search_text: str) -> list[float]:
 
 async def _rule_candidates(need: VisitorNeed, db: AsyncSession) -> list[ProductCandidate]:
     statement = (
-        select(MerchantProduct, Merchant.tier)
+        select(MerchantProduct, Merchant)
         .join(Merchant, Merchant.id == MerchantProduct.merchant_id)
         .where(MerchantProduct.status == "listed")
         .order_by(desc(MerchantProduct.updated_at))
@@ -867,7 +868,7 @@ async def _rule_candidates(need: VisitorNeed, db: AsyncSession) -> list[ProductC
 
     if not rows and need.category:
         result = await db.execute(
-            select(MerchantProduct, Merchant.tier)
+            select(MerchantProduct, Merchant)
             .join(Merchant, Merchant.id == MerchantProduct.merchant_id)
             .where(MerchantProduct.status == "listed")
             .where(_category_filter(need.category))
@@ -877,7 +878,7 @@ async def _rule_candidates(need: VisitorNeed, db: AsyncSession) -> list[ProductC
         rows = result.all()
     if not rows:
         result = await db.execute(
-            select(MerchantProduct, Merchant.tier)
+            select(MerchantProduct, Merchant)
             .join(Merchant, Merchant.id == MerchantProduct.merchant_id)
             .where(MerchantProduct.status == "listed")
             .order_by(desc(MerchantProduct.updated_at))
@@ -889,11 +890,11 @@ async def _rule_candidates(need: VisitorNeed, db: AsyncSession) -> list[ProductC
     return [
         ProductCandidate(
             product=product,
-            merchant_tier=str(tier.value if isinstance(tier, MerchantTier) else tier),
+            merchant_tier=effective_merchant_tier_value(merchant),
             image_url=image_urls.get(product.id) or _legacy_image_url(product),
             vector_distance=None,
         )
-        for product, tier in rows
+        for product, merchant in rows
     ]
 
 

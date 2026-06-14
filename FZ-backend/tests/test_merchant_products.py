@@ -57,7 +57,10 @@ def make_vip(email: str) -> None:
     engine = create_engine(settings.sync_database_url)
     with engine.begin() as connection:
         connection.execute(
-            text("update merchants set tier = 'vip' where email = :email"),
+            text(
+                "update merchants set tier = 'vip', vip_started_at = now(), "
+                "vip_expires_at = now() + interval '1 year' where email = :email"
+            ),
             {"email": email},
         )
 

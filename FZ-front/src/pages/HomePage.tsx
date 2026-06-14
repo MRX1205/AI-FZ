@@ -6,13 +6,19 @@ import type {
   ChatMessage,
   ChatMessagePairResponse,
   ChatSessionResponse,
+  MerchantAuthSession,
   ProductCard,
 } from '../types/domain'
+import {
+  clearMerchantSession,
+  getAuthHeaders,
+  readMerchantSession,
+  updateMerchantSessionMerchant,
+} from './merchantAuthStorage'
 
 const STORAGE_SESSION_ID = 'fz_home_chat_session_id_v1'
 const STORAGE_MESSAGES = 'fz_home_chat_messages_v1'
 const STORAGE_VISITOR_ID = 'fz_visitor_id_v1'
-const STORAGE_MERCHANT_SESSION = 'fz_merchant_session_v1'
 const STORAGE_VERSION = 'fz_home_chat_version_v1'
 const CURRENT_STORAGE_VERSION = '2026-06-14-product-match-v1'
 const MAX_INPUT_LENGTH = 300
@@ -285,10 +291,26 @@ export function HomePage() {
     }
   }
 
-  function handleMerchantEntry() {
-    // 后续登录页写入 fz_merchant_session_v1；首页只按是否存在登录态做跳转。
-    const merchantSession = localStorage.getItem(STORAGE_MERCHANT_SESSION)
-    navigate(merchantSession ? '/merchant/dashboard' : '/merchant/auth')
+  async function handleMerchantEntry() {
+    const merchantSession = readMerchantSession()
+    if (!merchantSession?.token) {
+      navigate('/merchant/auth')
+      return
+    }
+
+    try {
+      const merchant = await apiGet<MerchantAuthSession['merchant']>('/api/auth/me', {
+        headers: getAuthHeaders(merchantSession.token),
+        cache: 'no-store',
+      })
+      updateMerchantSessionMerchant(merchant)
+      navigate('/merchant/dashboard')
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        clearMerchantSession()
+      }
+      navigate('/merchant/auth')
+    }
   }
 
   return (
@@ -300,7 +322,7 @@ export function HomePage() {
           </span>
           <span>AI翡翠匹配</span>
         </div>
-        <button className="merchant-entry" type="button" onClick={handleMerchantEntry}>
+        <button className="merchant-entry" type="button" onClick={() => void handleMerchantEntry()}>
           商家入驻
         </button>
       </header>

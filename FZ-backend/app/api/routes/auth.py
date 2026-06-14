@@ -18,6 +18,7 @@ from app.schemas.auth import (
     MerchantMeOut,
     MerchantOut,
 )
+from app.services.merchant_membership import effective_merchant_tier_value
 
 router = APIRouter(prefix="/auth")
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -31,7 +32,11 @@ SESSION_EXPIRES_DAYS = 30
 
 
 def _merchant_out(merchant: Merchant) -> MerchantOut:
-    return MerchantOut(id=merchant.id, email=merchant.email, tier=merchant.tier.value)
+    return MerchantOut(
+        id=merchant.id,
+        email=merchant.email,
+        tier=effective_merchant_tier_value(merchant),
+    )
 
 
 @router.post("/send-code", response_model=AuthCodeOut, response_model_by_alias=True)
@@ -117,7 +122,7 @@ async def me(credentials: AuthCredentials, db: DbSession) -> MerchantMeOut:
     return MerchantMeOut(
         id=merchant.id,
         email=merchant.email,
-        tier=merchant.tier.value,
+        tier=effective_merchant_tier_value(merchant),
         session_expires_at=merchant_session.expires_at,
     )
 

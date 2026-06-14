@@ -49,7 +49,10 @@ def seed_product(
         merchant_id = connection.execute(
             text(
                 "insert into merchants (email, tier, vip_started_at, vip_expires_at) "
-                "values (:email, :tier, null, null) returning id"
+                "values (:email, :tier, "
+                "case when :tier = 'vip' then now() else null end, "
+                "case when :tier = 'vip' then now() + interval '1 year' else null end) "
+                "returning id"
             ),
             {"email": email, "tier": tier},
         ).scalar_one()

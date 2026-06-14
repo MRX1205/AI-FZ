@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.models.auth import AuthCode, MerchantSession
 from app.models.lead import MerchantLead, MerchantNotification
-from app.models.merchant import Merchant, MerchantTier
+from app.models.merchant import Merchant
 from app.models.product import MerchantProduct, MerchantProductEmbedding, MerchantProductImage
 from app.schemas.auth import AuthCodeOut
 from app.schemas.merchant import (
@@ -41,6 +42,7 @@ from app.schemas.merchant import (
     NotificationSettingsOut,
 )
 from app.services.embeddings import ProductEmbeddingError, embedding_client
+from app.services.merchant_membership import effective_merchant_tier_value, is_effective_vip
 from app.services.product_image_recognition_agent import (
     ProductImageRecognitionError,
     product_image_recognition_agent,
@@ -57,8 +59,7 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 AuthCredentials = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)]
 DEV_CODE = "123456"
 CODE_EXPIRES_SECONDS = 300
-VIP_FALLBACK_START = datetime(2024, 5, 20, tzinfo=UTC)
-VIP_FALLBACK_EXPIRES = datetime(2025, 5, 20, tzinfo=UTC)
+SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 UPLOAD_ROOT = Path(__file__).resolve().parents[3] / "uploads" / "products"
 
 
@@ -85,18 +86,14 @@ async def _get_current_merchant(
 
 
 def _profile_out(merchant: Merchant) -> MerchantProfileOut:
-    vip_started_at = merchant.vip_started_at
-    vip_expires_at = merchant.vip_expires_at
-    if merchant.tier == MerchantTier.vip:
-        vip_started_at = vip_started_at or VIP_FALLBACK_START
-        vip_expires_at = vip_expires_at or VIP_FALLBACK_EXPIRES
+    is_vip = is_effective_vip(merchant)
 
     return MerchantProfileOut(
         id=merchant.id,
         email=merchant.email,
-        tier=merchant.tier.value,
-        vip_started_at=vip_started_at,
-        vip_expires_at=vip_expires_at,
+        tier=effective_merchant_tier_value(merchant),
+        vip_started_at=merchant.vip_started_at if is_vip else None,
+        vip_expires_at=merchant.vip_expires_at if is_vip else None,
         notifications=NotificationSettingsOut(
             web_notification_enabled=True,
             email_notification_enabled=merchant.email_notification_enabled,
@@ -108,12 +105,12 @@ def _dashboard_merchant_out(merchant: Merchant) -> DashboardMerchantOut:
     return DashboardMerchantOut(
         id=merchant.id,
         email=merchant.email,
-        tier=merchant.tier.value,
+        tier=effective_merchant_tier_value(merchant),
     )
 
 
 def _visible_buyer_email(merchant: Merchant, buyer_email: str) -> str:
-    if merchant.tier == MerchantTier.vip:
+    if is_effective_vip(merchant):
         return buyer_email
     return "****@***.com"
 
@@ -183,7 +180,7 @@ async def _refresh_product_embedding(
 
 
 def _product_limit(merchant: Merchant) -> int:
-    return 100 if merchant.tier == MerchantTier.vip else 2
+    return 100 if is_effective_vip(merchant) else 2
 
 
 async def _product_images(
@@ -370,7 +367,7 @@ async def _seed_products_if_empty(merchant: Merchant, db: AsyncSession) -> None:
             updated_at=datetime(2026, 5, 15, 14, 30, tzinfo=UTC),
         ),
     ]
-    if merchant.tier == MerchantTier.vip:
+    if is_effective_vip(merchant):
         for index in range(2, 11):
             seed_products.append(
                 MerchantProduct(
@@ -448,7 +445,7 @@ def _remove_uploaded_file(image_url: str) -> None:
 
 
 def _quota_exceeded_detail(merchant: Merchant) -> str:
-    if merchant.tier == MerchantTier.vip:
+    if is_effective_vip(merchant):
         return "请下架部分商品后再发布"
     return "需升级VIP提升发布额度"
 
@@ -542,7 +539,7 @@ async def _seed_notifications_if_empty(merchant: Merchant, db: AsyncSession) -> 
             sent_at=datetime(2026, 5, 19, 15, 22, tzinfo=UTC),
         ),
     ]
-    if merchant.tier == MerchantTier.vip:
+    if is_effective_vip(merchant):
         notifications.append(
             MerchantNotification(
                 merchant_id=merchant.id,
@@ -556,43 +553,69 @@ async def _seed_notifications_if_empty(merchant: Merchant, db: AsyncSession) -> 
     await db.commit()
 
 
+def _today_bounds_utc() -> tuple[datetime, datetime]:
+    today_start = datetime.now(SHANGHAI_TZ).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    tomorrow_start = today_start + timedelta(days=1)
+    return today_start.astimezone(UTC), tomorrow_start.astimezone(UTC)
+
+
 @router.get("/dashboard", response_model=MerchantDashboardOut, response_model_by_alias=True)
 async def dashboard(credentials: AuthCredentials, db: DbSession) -> MerchantDashboardOut:
     merchant = await _get_current_merchant(credentials, db)
-    is_vip = merchant.tier == MerchantTier.vip
-    product_limit = 100 if is_vip else 2
+    product_limit = _product_limit(merchant)
+    today_start, tomorrow_start = _today_bounds_utc()
 
-    # 商品和客资模块的后台首页统计先保持原型额度展示。
+    listed_products = await db.scalar(
+        select(func.count())
+        .select_from(MerchantProduct)
+        .where(
+            MerchantProduct.merchant_id == merchant.id,
+            MerchantProduct.status == "listed",
+        )
+    )
+    today_leads = await db.scalar(
+        select(func.count())
+        .select_from(MerchantLead)
+        .where(
+            MerchantLead.merchant_id == merchant.id,
+            MerchantLead.submitted_at >= today_start,
+            MerchantLead.submitted_at < tomorrow_start,
+        )
+    )
+    total_leads = await db.scalar(
+        select(func.count())
+        .select_from(MerchantLead)
+        .where(MerchantLead.merchant_id == merchant.id)
+    )
+    recent_result = await db.execute(
+        select(MerchantLead)
+        .where(MerchantLead.merchant_id == merchant.id)
+        .order_by(MerchantLead.submitted_at.desc())
+        .limit(3)
+    )
+
     return MerchantDashboardOut(
         merchant=_dashboard_merchant_out(merchant),
         stats=DashboardStatsOut(
-            listed_products=product_limit,
+            listed_products=listed_products or 0,
             product_limit=product_limit,
-            today_leads=8,
-            total_leads=128,
+            today_leads=today_leads or 0,
+            total_leads=total_leads or 0,
         ),
         recent_leads=[
             DashboardLeadOut(
-                id="lead-1",
-                submitted_at=datetime(2026, 5, 20, 10, 30, tzinfo=UTC),
-                buyer_email="buyer1@email.com",
-                message="预算5万左右，冰种手镯，55圈口，想看无纹无裂的货源",
-                product_title="冰种晴底圆条手镯",
-            ),
-            DashboardLeadOut(
-                id="lead-2",
-                submitted_at=datetime(2026, 5, 19, 15, 20, tzinfo=UTC),
-                buyer_email="buyer2@email.com",
-                message="送礼用，冰种飘绿吊坠，要求证书齐全",
-                product_title="冰种飘绿翡翠吊坠",
-            ),
-            DashboardLeadOut(
-                id="lead-3",
-                submitted_at=datetime(2026, 5, 18, 9, 10, tzinfo=UTC),
-                buyer_email="buyer3@email.com",
-                message="冰种平安扣，预算2万，无纹裂，日常佩戴",
-                product_title="冰种平安扣",
-            ),
+                id=str(lead.id),
+                submitted_at=lead.submitted_at,
+                buyer_email=_visible_buyer_email(merchant, lead.buyer_email),
+                message=lead.message,
+                product_title=lead.product_title,
+            )
+            for lead in recent_result.scalars().all()
         ],
     )
 
@@ -1146,7 +1169,7 @@ async def update_lead_status(
     db: DbSession,
 ) -> MerchantLeadOut:
     merchant = await _get_current_merchant(credentials, db)
-    if merchant.tier != MerchantTier.vip:
+    if not is_effective_vip(merchant):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="VIP required")
 
     result = await db.execute(
@@ -1178,9 +1201,7 @@ async def notifications(
     merchant = await _get_current_merchant(credentials, db)
     await _seed_notifications_if_empty(merchant, db)
 
-    allowed_types = (
-        ["new_lead", "vip_expiring"] if merchant.tier == MerchantTier.vip else ["new_lead"]
-    )
+    allowed_types = ["new_lead", "vip_expiring"] if is_effective_vip(merchant) else ["new_lead"]
     result = await db.execute(
         select(MerchantNotification)
         .where(
