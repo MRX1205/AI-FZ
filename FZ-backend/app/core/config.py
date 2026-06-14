@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     dashscope_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     dashscope_embedding_model: str = "text-embedding-v4"
     dashscope_embedding_dimensions: int = 1024
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_otp_expires_seconds: int = 300
+    supabase_auth_timeout_seconds: float = 10.0
+    supabase_email_redirect_to: str = ""
 
     @field_validator("backend_cors_origins", mode="before")
     @classmethod

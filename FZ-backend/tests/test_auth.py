@@ -18,7 +18,7 @@ def setup_function() -> None:
 def test_send_code_and_login_creates_free_merchant() -> None:
     send_response = client.post("/api/auth/send-code", json={"email": "Merchant@Example.com"})
     assert send_response.status_code == 200
-    assert send_response.json()["devCode"] == "123456"
+    assert "devCode" not in send_response.json()
 
     login_response = client.post(
         "/api/auth/login",
@@ -48,3 +48,17 @@ def test_login_rejects_wrong_code() -> None:
     )
 
     assert response.status_code == 400
+
+
+def test_send_code_returns_clear_error_when_supabase_is_not_configured(monkeypatch) -> None:
+    from app.services.supabase_otp import SupabaseOtpNotConfiguredError, supabase_otp_client
+
+    async def fail_send_email_code(email: str) -> None:
+        raise SupabaseOtpNotConfiguredError("邮箱验证码服务未配置")
+
+    monkeypatch.setattr(supabase_otp_client, "send_email_code", fail_send_email_code)
+
+    response = client.post("/api/auth/send-code", json={"email": "merchant@example.com"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "邮箱验证码服务未配置"

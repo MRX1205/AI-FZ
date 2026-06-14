@@ -21,7 +21,7 @@ export function MerchantAuthPage() {
 
   const normalizedEmail = useMemo(() => email.trim().toLowerCase(), [email])
   const canRequestCode = isValidEmail(normalizedEmail) && countdown === 0 && !isSendingCode
-  const canLogin = isValidEmail(normalizedEmail) && code.trim().length > 0 && !isLoggingIn
+  const canLogin = isValidEmail(normalizedEmail) && code.trim().length === 6 && !isLoggingIn
 
   useEffect(() => {
     if (countdown <= 0) return
@@ -41,11 +41,11 @@ export function MerchantAuthPage() {
     setMessage('')
 
     try {
-      const response = await apiPost<AuthCodeResponse>('/api/auth/send-code', {
+      await apiPost<AuthCodeResponse>('/api/auth/send-code', {
         email: normalizedEmail,
       })
       setCountdown(60)
-      setMessage(`开发验证码：${response.devCode}`)
+      setMessage('验证码已发送，请查收邮件中的 6 位验证码')
     } catch {
       setMessage('验证码获取失败，请检查邮箱后重试')
     } finally {
@@ -118,9 +118,10 @@ export function MerchantAuthPage() {
               type="text"
               inputMode="numeric"
               autoComplete="one-time-code"
+              maxLength={6}
               value={code}
-              placeholder="请输入验证码"
-              onChange={(event) => setCode(event.target.value)}
+              placeholder="请输入6位验证码"
+              onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
             />
             <span className="auth-countdown">{countdown > 0 ? `${countdown}s` : ''}</span>
           </label>

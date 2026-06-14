@@ -11,8 +11,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.session import get_db
-from app.models.auth import AuthCode, MerchantSession
+from app.models.auth import MerchantSession
 from app.models.lead import MerchantLead, MerchantNotification
 from app.models.merchant import Merchant
 from app.models.product import MerchantProduct, MerchantProductEmbedding, MerchantProductImage
@@ -51,14 +52,18 @@ from app.services.product_search import (
     product_search_content_hash,
     refresh_product_search_text,
 )
+from app.services.supabase_otp import (
+    SupabaseOtpError,
+    SupabaseOtpInvalidError,
+    SupabaseOtpNotConfiguredError,
+    supabase_otp_client,
+)
 
 router = APIRouter(prefix="/merchant")
 bearer_scheme = HTTPBearer(auto_error=False)
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 AuthCredentials = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)]
-DEV_CODE = "123456"
-CODE_EXPIRES_SECONDS = 300
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 UPLOAD_ROOT = Path(__file__).resolve().parents[3] / "uploads" / "products"
 
@@ -626,23 +631,29 @@ async def profile(credentials: AuthCredentials, db: DbSession) -> MerchantProfil
     return _profile_out(merchant)
 
 
-@router.post("/profile/email-code", response_model=AuthCodeOut, response_model_by_alias=True)
+@router.post(
+    "/profile/email-code",
+    response_model=AuthCodeOut,
+    response_model_by_alias=True,
+    response_model_exclude_none=True,
+)
 async def send_profile_email_code(
     payload: MerchantEmailCodeCreate,
     credentials: AuthCredentials,
     db: DbSession,
 ) -> AuthCodeOut:
     await _get_current_merchant(credentials, db)
-    auth_code = AuthCode(
-        email=payload.email,
-        # 开发阶段固定验证码，后续接真实邮件服务时替换发送逻辑。
-        code=DEV_CODE,
-        expires_at=datetime.now(UTC) + timedelta(seconds=CODE_EXPIRES_SECONDS),
-    )
-    db.add(auth_code)
-    await db.commit()
+    try:
+        await supabase_otp_client.send_email_code(payload.email)
+    except SupabaseOtpNotConfiguredError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except SupabaseOtpError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
 
-    return AuthCodeOut(ok=True, expires_in=CODE_EXPIRES_SECONDS, dev_code=DEV_CODE)
+    return AuthCodeOut(ok=True, expires_in=settings.supabase_otp_expires_seconds)
 
 
 @router.patch("/profile/email", response_model=MerchantProfileOut, response_model_by_alias=True)
@@ -658,26 +669,21 @@ async def update_profile_email(
     if existing_result.scalar_one_or_none() is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already exists")
 
-    now = datetime.now(UTC)
-    code_result = await db.execute(
-        select(AuthCode)
-        .where(
-            AuthCode.email == payload.email,
-            AuthCode.code == payload.code,
-            AuthCode.used_at.is_(None),
-            AuthCode.expires_at > now,
-        )
-        .order_by(AuthCode.created_at.desc())
-        .limit(1)
-    )
-    auth_code = code_result.scalar_one_or_none()
-    if auth_code is None:
+    try:
+        await supabase_otp_client.verify_email_code(payload.email, payload.code)
+    except SupabaseOtpInvalidError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification code",
-        )
+            detail="验证码错误或已过期",
+        ) from error
+    except SupabaseOtpNotConfiguredError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except SupabaseOtpError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
 
-    auth_code.used_at = now
     merchant.email = payload.email
     await db.commit()
     await db.refresh(merchant)

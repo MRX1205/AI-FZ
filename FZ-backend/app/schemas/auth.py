@@ -23,14 +23,14 @@ class AuthCodeCreate(BaseModel):
 class AuthCodeOut(BaseModel):
     ok: bool
     expires_in: int = Field(serialization_alias="expiresIn")
-    dev_code: str = Field(serialization_alias="devCode")
+    dev_code: str | None = Field(default=None, serialization_alias="devCode")
 
     model_config = ConfigDict(populate_by_name=True)
 
 
 class AuthLoginCreate(BaseModel):
     email: str = Field(min_length=3, max_length=320)
-    code: str = Field(min_length=4, max_length=16)
+    code: str = Field(min_length=6, max_length=6)
 
     @field_validator("email")
     @classmethod

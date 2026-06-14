@@ -111,7 +111,7 @@ export type MerchantAuthSession = {
 export type AuthCodeResponse = {
   ok: boolean
   expiresIn: number
-  devCode: string
+  devCode?: string
 }
 
 export type MerchantDashboardLead = {

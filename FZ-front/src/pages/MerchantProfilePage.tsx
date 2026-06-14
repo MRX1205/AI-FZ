@@ -85,20 +85,24 @@ export function MerchantProfilePage() {
       return
     }
 
-    const response = await apiPost<AuthCodeResponse>(
-      '/api/merchant/profile/email-code',
-      {
-        email: newEmail.trim().toLowerCase(),
-      },
-      {
-        headers: getAuthHeaders(token),
-      },
-    )
-    setMessage(`开发验证码：${response.devCode}`)
+    try {
+      await apiPost<AuthCodeResponse>(
+        '/api/merchant/profile/email-code',
+        {
+          email: newEmail.trim().toLowerCase(),
+        },
+        {
+          headers: getAuthHeaders(token),
+        },
+      )
+      setMessage('验证码已发送，请查收邮件中的 6 位验证码')
+    } catch {
+      setMessage('验证码获取失败，请检查邮箱后重试')
+    }
   }
 
   async function handleSaveEmail() {
-    if (!token || !isValidEmail(newEmail) || !emailCode.trim()) {
+    if (!token || !isValidEmail(newEmail) || emailCode.trim().length !== 6) {
       setMessage('请填写新邮箱和验证码')
       return
     }
@@ -119,6 +123,8 @@ export function MerchantProfilePage() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 400) {
         setMessage('验证码错误、过期或邮箱已存在')
+      } else {
+        setMessage('修改邮箱失败，请稍后重试')
       }
     } finally {
       setIsSaving(false)
@@ -194,7 +200,14 @@ export function MerchantProfilePage() {
                 </button>
               </div>
               <div className="inline-control">
-                <input value={emailCode} placeholder="验证码" onChange={(event) => setEmailCode(event.target.value)} />
+                <input
+                  value={emailCode}
+                  placeholder="6位验证码"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  onChange={(event) => setEmailCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                />
                 <button type="button" disabled={isSaving} onClick={() => void handleSaveEmail()}>
                   保存
                 </button>

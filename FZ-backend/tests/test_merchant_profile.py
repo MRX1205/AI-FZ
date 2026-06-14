@@ -52,7 +52,7 @@ def test_update_profile_email_with_code() -> None:
         headers=auth_headers(session["token"]),
     )
     assert code_response.status_code == 200
-    assert code_response.json()["devCode"] == "123456"
+    assert "devCode" not in code_response.json()
 
     response = client.patch(
         "/api/merchant/profile/email",

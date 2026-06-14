@@ -7,8 +7,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.session import get_db
-from app.models.auth import AuthCode, MerchantSession
+from app.models.auth import MerchantSession
 from app.models.merchant import Merchant, MerchantTier
 from app.schemas.auth import (
     AuthCodeCreate,
@@ -19,6 +20,12 @@ from app.schemas.auth import (
     MerchantOut,
 )
 from app.services.merchant_membership import effective_merchant_tier_value
+from app.services.supabase_otp import (
+    SupabaseOtpError,
+    SupabaseOtpInvalidError,
+    SupabaseOtpNotConfiguredError,
+    supabase_otp_client,
+)
 
 router = APIRouter(prefix="/auth")
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -26,8 +33,6 @@ bearer_scheme = HTTPBearer(auto_error=False)
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 AuthCredentials = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)]
 
-DEV_CODE = "123456"
-CODE_EXPIRES_SECONDS = 300
 SESSION_EXPIRES_DAYS = 30
 
 
@@ -39,42 +44,44 @@ def _merchant_out(merchant: Merchant) -> MerchantOut:
     )
 
 
-@router.post("/send-code", response_model=AuthCodeOut, response_model_by_alias=True)
-async def send_code(payload: AuthCodeCreate, db: DbSession) -> AuthCodeOut:
-    now = datetime.now(UTC)
-    auth_code = AuthCode(
-        email=payload.email,
-        # 开发阶段固定验证码，后续接邮件服务时只替换这里的发送逻辑。
-        code=DEV_CODE,
-        expires_at=now + timedelta(seconds=CODE_EXPIRES_SECONDS),
-    )
-    db.add(auth_code)
-    await db.commit()
+@router.post(
+    "/send-code",
+    response_model=AuthCodeOut,
+    response_model_by_alias=True,
+    response_model_exclude_none=True,
+)
+async def send_code(payload: AuthCodeCreate) -> AuthCodeOut:
+    try:
+        await supabase_otp_client.send_email_code(payload.email)
+    except SupabaseOtpNotConfiguredError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except SupabaseOtpError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
 
-    return AuthCodeOut(ok=True, expires_in=CODE_EXPIRES_SECONDS, dev_code=DEV_CODE)
+    return AuthCodeOut(ok=True, expires_in=settings.supabase_otp_expires_seconds)
 
 
 @router.post("/login", response_model=AuthLoginOut)
 async def login(payload: AuthLoginCreate, db: DbSession) -> AuthLoginOut:
-    now = datetime.now(UTC)
-    code_result = await db.execute(
-        select(AuthCode)
-        .where(
-            AuthCode.email == payload.email,
-            AuthCode.code == payload.code,
-            AuthCode.used_at.is_(None),
-            AuthCode.expires_at > now,
-        )
-        .order_by(AuthCode.created_at.desc())
-        .limit(1)
-    )
-    auth_code = code_result.scalar_one_or_none()
-    if auth_code is None:
+    try:
+        await supabase_otp_client.verify_email_code(payload.email, payload.code)
+    except SupabaseOtpInvalidError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired verification code",
-        )
+            detail="验证码错误或已过期",
+        ) from error
+    except SupabaseOtpNotConfiguredError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
+    except SupabaseOtpError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
 
+    now = datetime.now(UTC)
     merchant_result = await db.execute(select(Merchant).where(Merchant.email == payload.email))
     merchant = merchant_result.scalar_one_or_none()
     if merchant is None:
@@ -87,7 +94,6 @@ async def login(payload: AuthLoginCreate, db: DbSession) -> AuthLoginOut:
         db.add(merchant)
         await db.flush()
 
-    auth_code.used_at = now
     session = MerchantSession(
         merchant_id=merchant.id,
         token=str(uuid.uuid4()),
