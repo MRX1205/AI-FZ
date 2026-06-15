@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ApiError, apiAssetUrl, apiGet, apiUpload } from '../api/client'
 import { ImagePreview } from '../components/ImagePreview'
+import { MerchantTabBar } from '../components/MerchantTabBar'
 import type { MerchantProduct, MerchantProductDraftGenerateResponse } from '../types/domain'
 import { clearMerchantSession, getAuthHeaders, readMerchantSession } from './merchantAuthStorage'
 
@@ -185,6 +186,7 @@ export function MerchantPublishResultPage() {
           {message ? <p className="product-edit-message">{message}</p> : null}
         </div>
       )}
+      <MerchantTabBar />
       {previewIndex !== null ? (
         <ImagePreview
           images={resolvedImageUrls}

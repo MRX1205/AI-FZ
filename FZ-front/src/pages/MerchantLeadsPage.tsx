@@ -2,6 +2,7 @@ import { ChevronLeft } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiGet } from '../api/client'
+import { MerchantTabBar } from '../components/MerchantTabBar'
 import type { MerchantLeadListResponse, MerchantLeadStatus } from '../types/domain'
 import {
   clearMerchantSession,
@@ -124,6 +125,8 @@ export function MerchantLeadsPage() {
           </button>
         </div>
       ) : null}
+
+      <MerchantTabBar />
     </section>
   )
 }

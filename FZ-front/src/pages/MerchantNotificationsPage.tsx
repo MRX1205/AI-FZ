@@ -2,6 +2,7 @@ import { Bell, ChevronLeft } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiGet } from '../api/client'
+import { MerchantTabBar } from '../components/MerchantTabBar'
 import type { MerchantNotificationListResponse } from '../types/domain'
 import {
   clearMerchantSession,
@@ -80,6 +81,8 @@ export function MerchantNotificationsPage() {
           </ul>
         </div>
       )}
+
+      <MerchantTabBar />
     </section>
   )
 }

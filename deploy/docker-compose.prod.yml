@@ -1,0 +1,79 @@
+services:
+  # ========== PostgreSQL 数据库 ==========
+  postgres:
+    image: pgvector/pgvector:pg16                           # 带向量扩展的 PostgreSQL 16
+    container_name: fz-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fz}                       # 数据库名
+      POSTGRES_USER: ${POSTGRES_USER:-fz_user}              # 数据库用户
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}  # 数据库密码（必填）
+    volumes:
+      - fz_postgres_data:/var/lib/postgresql/data           # 数据持久化
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ========== Mailpit 邮件调试 ==========
+  # SMTP 端口 6142，Web 界面端口 6143
+  # 用于捕获和查看所有发出的邮件（调试用）
+  mailpit:
+    image: axllent/mailpit:v1.22.0
+    container_name: fz-mailpit
+    restart: unless-stopped
+    ports:
+      - "6142:1025"                                         # SMTP 端口（外部 6142 → 容器 1025）
+      - "6143:8025"                                         # Web UI 端口（外部 6143 → 容器 8025）
+    environment:
+      MP_SMTP_BIND_ADDR: 0.0.0.0:1025                       # SMTP 监听地址
+      MP_UI_BIND_ADDR: 0.0.0.0:8025                         # Web UI 监听地址
+    volumes:
+      - fz_mailpit_data:/data                               # 邮件数据持久化
+
+  # ========== 后端 FastAPI ==========
+  backend:
+    build:
+      context: ../FZ-backend                                # 后端源码目录
+    container_name: fz-backend-prod
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy                          # 等数据库就绪
+    env_file:
+      - ./.env.production                                   # 加载生产环境变量
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-fz_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fz}  # Docker 内固定走 postgres 服务名
+      SYNC_DATABASE_URL: postgresql://${POSTGRES_USER:-fz_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-fz}      # 迁移连接
+      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS}         # 跨域白名单
+      FRONTEND_PUBLIC_BASE_URL: ${FRONTEND_PUBLIC_BASE_URL} # 前端公网地址
+      BACKEND_PUBLIC_BASE_URL: ${BACKEND_PUBLIC_BASE_URL}   # 后端公网地址
+      SUPABASE_EMAIL_REDIRECT_TO: ${SUPABASE_EMAIL_REDIRECT_TO}  # 邮箱验证跳转
+      ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL}               # 支付宝异步回调
+      ALIPAY_RETURN_URL: ${ALIPAY_RETURN_URL}               # 支付宝同步跳转
+    volumes:
+      - ../FZ-backend/uploads:/app/uploads                  # 上传文件持久化
+      - ./secrets/alipay-app-private-key.pem:/run/secrets/alipay-app-private-key.pem:ro  # 支付宝私钥（只读）
+      - ./secrets/alipay-public-key.pem:/run/secrets/alipay-public-key.pem:ro            # 支付宝公钥（只读）
+    ports:
+      - "6141:8000"                                         # 后端端口（外部 6141 → 容器 8000）
+
+  # ========== 前端 Nginx ==========
+  frontend:
+    build:
+      context: ../FZ-front                                  # 前端源码目录
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}             # 构建时注入 API 地址
+    container_name: fz-front-prod
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started                          # 等后端启动
+    ports:
+      - "6140:80"                                           # 前端端口（外部 6140 → 容器 80）
+
+# ========== 数据卷 ==========
+volumes:
+  fz_postgres_data:                                         # PostgreSQL 数据
+  fz_mailpit_data:                                          # Mailpit 邮件数据

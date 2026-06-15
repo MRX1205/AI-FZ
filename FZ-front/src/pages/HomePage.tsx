@@ -180,7 +180,12 @@ export function HomePage() {
 
     apiGet<ChatSessionResponse>(`/api/chat/sessions/${sessionId}/messages`)
       .then((response) => {
-        setMessages(response.messages)
+        setMessages((current) => {
+          if (response.messages.length === 0 && current.length > 0) {
+            return current
+          }
+          return response.messages
+        })
       })
       .catch(() => {
         localStorage.removeItem(STORAGE_SESSION_ID)
@@ -233,6 +238,8 @@ export function HomePage() {
 
     const userPlaceholder = tempMessage('user', trimmedContent)
     const assistantPlaceholder = tempMessage('assistant', '')
+    setMessages((current) => [...current, userPlaceholder, assistantPlaceholder])
+
     const appendDelta = (delta: string) => {
       setMessages((current) =>
         current.map((message) =>
@@ -254,7 +261,6 @@ export function HomePage() {
 
     try {
       const activeSessionId = await ensureSession()
-      setMessages((current) => [...current, userPlaceholder, assistantPlaceholder])
 
       try {
         await postChatMessageStream({

@@ -24,6 +24,8 @@ FZ-backend/uploads/
 
 # Local data
 *.log
+FZ-backend.zip
+deploy/secrets/
 
 # Local tool directories
 .idea/

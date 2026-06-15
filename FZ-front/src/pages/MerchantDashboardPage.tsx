@@ -4,17 +4,15 @@ import {
   ChevronRight,
   Clock3,
   Crown,
-  Home,
-  LayoutDashboard,
   Package,
   Plus,
   UserRound,
 } from 'lucide-react'
-import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiGet } from '../api/client'
-import type { MerchantDashboardResponse, MerchantTier } from '../types/domain'
+import { MerchantTabBar } from '../components/MerchantTabBar'
+import type { MerchantDashboardResponse } from '../types/domain'
 import {
   clearMerchantSession,
   readMerchantSession,
@@ -64,8 +62,7 @@ export function MerchantDashboardPage() {
       })
   }, [navigate])
 
-  const tier = dashboard?.merchant.tier ?? 'free'
-  const isVip = tier === 'vip'
+  const isVip = dashboard?.merchant.tier === 'vip'
 
   return (
     <section className="merchant-dashboard-page">
@@ -100,7 +97,7 @@ export function MerchantDashboardPage() {
         )}
       </div>
 
-      <DashboardTabBar tier={tier} />
+      <MerchantTabBar />
     </section>
   )
 }
@@ -194,48 +191,5 @@ function LeadPromo() {
       <strong>极速匹配客源</strong>
       <span>AI智能分发，成交快人一步</span>
     </section>
-  )
-}
-
-function DashboardTabBar({ tier }: { tier: MerchantTier }) {
-  const navigate = useNavigate()
-  const items = [
-    { label: '首页', path: '/', icon: <Home size={27} /> },
-    { label: '商品', path: '/merchant/products', icon: <Package size={27} /> },
-    { label: '管理后台', path: '/merchant/dashboard', icon: <LayoutDashboard size={27} />, active: true },
-    { label: '我的', path: '/merchant/profile', icon: <UserRound size={27} /> },
-  ]
-
-  return (
-    <nav className="dashboard-tabbar" aria-label={`${tier === 'vip' ? 'VIP' : '免费'}商家导航`}>
-      {items.map((item) => (
-        <TabButton
-          key={item.label}
-          active={item.active}
-          icon={item.icon}
-          label={item.label}
-          onClick={() => navigate(item.path)}
-        />
-      ))}
-    </nav>
-  )
-}
-
-function TabButton({
-  active,
-  icon,
-  label,
-  onClick,
-}: {
-  active?: boolean
-  icon: ReactNode
-  label: string
-  onClick: () => void
-}) {
-  return (
-    <button className={active ? 'is-active' : ''} type="button" onClick={onClick}>
-      {icon}
-      <span>{label}</span>
-    </button>
   )
 }

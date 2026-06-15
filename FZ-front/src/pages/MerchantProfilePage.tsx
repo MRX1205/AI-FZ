@@ -12,6 +12,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiGet, apiPatch, apiPost } from '../api/client'
+import { MerchantTabBar } from '../components/MerchantTabBar'
 import type { AuthCodeResponse, MerchantProfileResponse } from '../types/domain'
 import {
   clearMerchantSession,
@@ -241,6 +242,8 @@ export function MerchantProfilePage() {
 
         {message && activeSection !== 'email' ? <p className="profile-toast">{message}</p> : null}
       </div>
+
+      <MerchantTabBar />
     </section>
   )
 }

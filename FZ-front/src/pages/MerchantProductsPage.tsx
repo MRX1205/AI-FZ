@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError, apiAssetUrl, apiDelete, apiGet } from '../api/client'
 import { ImagePreview } from '../components/ImagePreview'
+import { MerchantTabBar } from '../components/MerchantTabBar'
 import type { MerchantProduct, MerchantProductListResponse, MerchantProductStatus } from '../types/domain'
 import {
   clearMerchantSession,
@@ -244,6 +245,8 @@ export function MerchantProductsPage() {
           {publishText}
         </button>
       </div>
+
+      <MerchantTabBar />
 
       {shareMessage ? <p className="product-toast">{shareMessage}</p> : null}
       {previewProduct ? (

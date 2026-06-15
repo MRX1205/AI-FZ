@@ -1058,7 +1058,7 @@ a {
   position: absolute;
   top: 22px;
   left: 22px;
-  z-index: 1;
+  z-index: 3;
   display: grid;
   place-items: center;
   border: 0;

@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -217,16 +218,41 @@ class ProductImageRecognitionAgent:
         return text
 
     def _product_image_data_url(self, image_url: str) -> str:
-        if not image_url.startswith("/uploads/"):
+        normalized_url = self._normalize_image_url(image_url)
+        if not normalized_url.startswith("/uploads/"):
             raise ProductImageRecognitionError("请上传商品图片后再生成", status_code=400)
 
-        image_path = UPLOAD_BASE / image_url.removeprefix("/uploads/")
+        relative_path = normalized_url.removeprefix("/uploads/")
+        image_path = self._resolve_uploaded_image_path(relative_path)
         if not image_path.exists():
             raise ProductImageRecognitionError("商品图片不存在", status_code=400)
 
         mime_type = mimetypes.guess_type(image_path.name)[0] or "image/jpeg"
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
         return f"data:{mime_type};base64,{encoded}"
+
+    def _normalize_image_url(self, image_url: str) -> str:
+        parsed = urlparse(image_url)
+        if parsed.scheme and parsed.netloc:
+            return parsed.path
+        return image_url.split("?", 1)[0]
+
+    def _resolve_uploaded_image_path(self, relative_path: str) -> Path:
+        candidates = [
+            UPLOAD_BASE / relative_path,
+            UPLOAD_BASE / "products" / relative_path,
+        ]
+        if relative_path.startswith("products/"):
+            candidates.append(UPLOAD_BASE / relative_path.removeprefix("products/"))
+
+        checked: set[Path] = set()
+        for candidate in candidates:
+            if candidate in checked:
+                continue
+            checked.add(candidate)
+            if candidate.exists():
+                return candidate
+        return candidates[0]
 
 
 product_image_recognition_agent = ProductImageRecognitionAgent()

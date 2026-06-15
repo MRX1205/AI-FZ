@@ -2,6 +2,7 @@ import { BriefcaseBusiness, Check, ChevronLeft } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiGet, apiPost } from '../api/client'
+import { MerchantTabBar } from '../components/MerchantTabBar'
 import type {
   MerchantAccountResponse,
   MerchantVipOrder,
@@ -181,6 +182,8 @@ export function MerchantAccountPage() {
           {isPaying ? '正在跳转支付...' : isVip ? '续费VIP' : '升级为VIP'}
         </button>
       </div>
+
+      <MerchantTabBar />
     </section>
   )
 }

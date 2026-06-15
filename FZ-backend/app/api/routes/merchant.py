@@ -436,79 +436,6 @@ async def _today_published_count(merchant: Merchant, db: AsyncSession) -> int:
     return count or 0
 
 
-async def _seed_products_if_empty(merchant: Merchant, db: AsyncSession) -> None:
-    existing_result = await db.execute(
-        select(MerchantProduct.id).where(MerchantProduct.merchant_id == merchant.id).limit(1)
-    )
-    if existing_result.scalar_one_or_none() is not None:
-        return
-
-    seed_products = [
-        MerchantProduct(
-            merchant_id=merchant.id,
-            title="冰种晴底翡翠手镯",
-            summary="冰种晴底，质地细腻通透，清新淡雅。",
-            detail="本款冰种晴底翡翠手镯，种水达到冰种级别，质地细腻，底色清新淡雅，圈口55mm，佩戴舒适贴合。",
-            tags=["冰种", "晴底色", "翡翠手镯", "正圈", "55圈口"],
-            price_cents=4_800_000,
-            status="listed",
-            image_urls=[
-                "/mock-products/jade-1.png",
-                "/mock-products/jade-2.png",
-                "/mock-products/jade-3.png",
-            ],
-            published_at=datetime(2026, 5, 20, 10, 30, tzinfo=UTC),
-            created_at=datetime(2026, 5, 20, 10, 30, tzinfo=UTC),
-            updated_at=datetime(2026, 5, 20, 10, 30, tzinfo=UTC),
-        ),
-        MerchantProduct(
-            merchant_id=merchant.id,
-            title="冰种飘花翡翠吊坠",
-            summary="冰种飘花，清爽耐看。",
-            detail="冰种飘花翡翠吊坠，底子干净，飘花灵动，适合日常佩戴。",
-            tags=["冰种", "飘花", "翡翠吊坠"],
-            price_cents=3_200_000,
-            status="draft",
-            image_urls=["/mock-products/jade-2.png", "/mock-products/jade-3.png"],
-            published_at=None,
-            created_at=datetime(2026, 5, 18, 10, 30, tzinfo=UTC),
-            updated_at=datetime(2026, 5, 18, 10, 30, tzinfo=UTC),
-        ),
-        MerchantProduct(
-            merchant_id=merchant.id,
-            title="糯冰种翡翠手镯",
-            summary="温润细腻，性价比高。",
-            detail="糯冰种翡翠手镯，质地温润，底色柔和，适合日常佩戴。",
-            tags=["糯冰种", "翡翠手镯", "收藏优选"],
-            price_cents=1_880_000,
-            status="unlisted",
-            image_urls=["/mock-products/jade-1.png"],
-            published_at=datetime(2026, 5, 15, 14, 30, tzinfo=UTC),
-            created_at=datetime(2026, 5, 15, 14, 30, tzinfo=UTC),
-            updated_at=datetime(2026, 5, 15, 14, 30, tzinfo=UTC),
-        ),
-    ]
-    if is_effective_vip(merchant):
-        for index in range(2, 11):
-            seed_products.append(
-                MerchantProduct(
-                    merchant_id=merchant.id,
-                    title=f"VIP精选翡翠货源{index}",
-                    summary="高品质翡翠货源，适合平台展示。",
-                    detail="VIP商家精选翡翠货源，图片清晰，种水表现稳定，可用于发布流程和后台管理联调。",
-                    tags=["翡翠", "精选", "VIP货源"],
-                    price_cents=2_800_000 + index * 100_000,
-                    status="listed",
-                    image_urls=[f"/mock-products/jade-{((index - 1) % 3) + 1}.png"],
-                    published_at=datetime(2026, 5, min(28, 10 + index), 10, 0, tzinfo=UTC),
-                    created_at=datetime(2026, 5, min(28, 10 + index), 10, 0, tzinfo=UTC),
-                    updated_at=datetime(2026, 5, min(28, 10 + index), 10, 0, tzinfo=UTC),
-                )
-            )
-    db.add_all(seed_products)
-    await db.commit()
-
-
 async def _apply_product_draft_update(
     product: MerchantProduct,
     payload: MerchantProductDraftUpdate,
@@ -581,97 +508,6 @@ async def _assert_product_quota_available(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=_quota_exceeded_detail(merchant),
         )
-
-
-async def _seed_leads_if_empty(merchant: Merchant, db: AsyncSession) -> None:
-    existing_result = await db.execute(
-        select(MerchantLead.id).where(MerchantLead.merchant_id == merchant.id).limit(1)
-    )
-    if existing_result.scalar_one_or_none() is not None:
-        return
-
-    # 商品模块尚未开发，客资先保存商品快照；后续接真实商品表时替换这里。
-    seed_leads = [
-        MerchantLead(
-            merchant_id=merchant.id,
-            submitted_at=datetime(2026, 5, 20, 10, 30, tzinfo=UTC),
-            buyer_email="buyer1@email.com",
-            message="预算5万左右，冰种手镯，55圈口，不要纹裂，颜色要清爽一点",
-            product_title="冰种晴底圆条手镯",
-            product_price_cents=4_800_000,
-            product_image_url="/mock-products/jade-1.png",
-            status="pending",
-        ),
-        MerchantLead(
-            merchant_id=merchant.id,
-            submitted_at=datetime(2026, 5, 19, 15, 20, tzinfo=UTC),
-            buyer_email="buyer2@email.com",
-            message="送礼用，冰种飘绿吊坠，要求证书齐全",
-            product_title="冰种飘花翡翠吊坠",
-            product_price_cents=2_680_000,
-            product_image_url="/mock-products/jade-2.png",
-            status="contacted",
-        ),
-        MerchantLead(
-            merchant_id=merchant.id,
-            submitted_at=datetime(2026, 5, 18, 9, 10, tzinfo=UTC),
-            buyer_email="buyer3@email.com",
-            message="冰种平安扣，预算2万，无纹裂，日常佩戴",
-            product_title="冰种平安扣",
-            product_price_cents=1_980_000,
-            product_image_url="/mock-products/jade-3.png",
-            status="pending",
-        ),
-        MerchantLead(
-            merchant_id=merchant.id,
-            submitted_at=datetime(2026, 5, 17, 16, 40, tzinfo=UTC),
-            buyer_email="buyer4@email.com",
-            message="想要帝王绿挂件，越绿越好",
-            product_title="帝王绿翡翠挂件",
-            product_price_cents=8_800_000,
-            product_image_url="/mock-products/jade-1.png",
-            status="pending",
-        ),
-    ]
-    db.add_all(seed_leads)
-    await db.commit()
-
-
-async def _seed_notifications_if_empty(merchant: Merchant, db: AsyncSession) -> None:
-    existing_result = await db.execute(
-        select(MerchantNotification.id)
-        .where(MerchantNotification.merchant_id == merchant.id)
-        .limit(1)
-    )
-    if existing_result.scalar_one_or_none() is not None:
-        return
-
-    notifications = [
-        MerchantNotification(
-            merchant_id=merchant.id,
-            type="new_lead",
-            content="有新客户对「冰种晴底圆条手镯」留下联系方式，请及时处理。",
-            sent_at=datetime(2026, 5, 20, 10, 31, tzinfo=UTC),
-        ),
-        MerchantNotification(
-            merchant_id=merchant.id,
-            type="new_lead",
-            content="有新客户对「冰种飘花翡翠吊坠」留下联系方式，请及时处理。",
-            sent_at=datetime(2026, 5, 19, 15, 22, tzinfo=UTC),
-        ),
-    ]
-    if is_effective_vip(merchant):
-        notifications.append(
-            MerchantNotification(
-                merchant_id=merchant.id,
-                type="vip_expiring",
-                content="您的VIP会员将在30天后到期，请联系运营续费。",
-                sent_at=datetime(2026, 5, 18, 9, 0, tzinfo=UTC),
-            )
-        )
-
-    db.add_all(notifications)
-    await db.commit()
 
 
 def _today_bounds_utc() -> tuple[datetime, datetime]:
@@ -996,7 +832,6 @@ async def products(
     ] = "all",
 ) -> MerchantProductListOut:
     merchant = await _get_current_merchant(credentials, db)
-    await _seed_products_if_empty(merchant, db)
 
     statement = select(MerchantProduct).where(MerchantProduct.merchant_id == merchant.id)
     if product_status != "all":
@@ -1024,7 +859,6 @@ async def current_product_draft(
     db: DbSession,
 ) -> MerchantProductCurrentDraftOut:
     merchant = await _get_current_merchant(credentials, db)
-    await _seed_products_if_empty(merchant, db)
     draft = await _get_latest_publish_flow_draft(merchant, db)
     _, quota = await _product_counts(merchant, db)
 
@@ -1043,15 +877,19 @@ async def current_product_draft(
 async def append_product_draft_images(
     credentials: AuthCredentials,
     db: DbSession,
+    product_id: Annotated[UUID | None, Form(alias="productId")] = None,
     images: Annotated[list[UploadFile] | None, File()] = None,
 ) -> MerchantProductOut:
     merchant = await _get_current_merchant(credentials, db)
-    await _seed_products_if_empty(merchant, db)
 
     if not images:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请先上传商品图片")
 
-    draft = await _get_latest_publish_flow_draft(merchant, db)
+    draft = (
+        await _get_merchant_product(product_id, merchant, db)
+        if product_id
+        else await _get_latest_publish_flow_draft(merchant, db)
+    )
     current_image_urls = await _current_product_image_urls(draft, db) if draft else []
     if len(current_image_urls) + len(images) > 6:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="最多上传6张图片")
@@ -1112,7 +950,6 @@ async def generate_product_draft(
     images: Annotated[list[UploadFile] | None, File()] = None,
 ) -> MerchantProductOut:
     merchant = await _get_current_merchant(credentials, db)
-    await _seed_products_if_empty(merchant, db)
 
     draft = await _get_merchant_product(product_id, merchant, db) if product_id else None
     current_image_urls = await _current_product_image_urls(draft, db) if draft else []
@@ -1187,7 +1024,6 @@ async def product_detail(
     db: DbSession,
 ) -> MerchantProductOut:
     merchant = await _get_current_merchant(credentials, db)
-    await _seed_products_if_empty(merchant, db)
     product = await _get_merchant_product(product_id, merchant, db)
 
     return await _product_out(product, db)
@@ -1401,7 +1237,6 @@ async def leads(
     ] = "all",
 ) -> MerchantLeadListOut:
     merchant = await _get_current_merchant(credentials, db)
-    await _seed_leads_if_empty(merchant, db)
 
     statement = select(MerchantLead).where(MerchantLead.merchant_id == merchant.id)
     if lead_status != "all":
@@ -1421,7 +1256,6 @@ async def lead_detail(
     db: DbSession,
 ) -> MerchantLeadOut:
     merchant = await _get_current_merchant(credentials, db)
-    await _seed_leads_if_empty(merchant, db)
 
     result = await db.execute(
         select(MerchantLead).where(
@@ -1478,7 +1312,6 @@ async def notifications(
     db: DbSession,
 ) -> MerchantNotificationListOut:
     merchant = await _get_current_merchant(credentials, db)
-    await _seed_notifications_if_empty(merchant, db)
 
     allowed_types = ["new_lead", "vip_expiring"] if is_effective_vip(merchant) else ["new_lead"]
     result = await db.execute(

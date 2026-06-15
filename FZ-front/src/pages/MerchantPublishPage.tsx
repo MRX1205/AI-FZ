@@ -3,6 +3,7 @@ import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } f
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiAssetUrl, apiDelete, apiGet, apiPatch, apiUpload } from '../api/client'
 import { ImagePreview } from '../components/ImagePreview'
+import { MerchantTabBar } from '../components/MerchantTabBar'
 import type {
   MerchantProduct,
   MerchantProductCurrentDraftResponse,
@@ -105,6 +106,9 @@ export function MerchantPublishPage() {
     }
 
     const formData = new FormData()
+    if (draftData?.product?.id) {
+      formData.append('productId', draftData.product.id)
+    }
     imageFiles.slice(0, remaining).forEach((file) => formData.append('images', file))
     setIsUploading(true)
     apiUpload<MerchantProduct>('/api/merchant/products/drafts/images', formData, {
@@ -360,6 +364,7 @@ export function MerchantPublishPage() {
         className="publish-file-input"
         onChange={(event) => handleFileChange(event)}
       />
+      <MerchantTabBar />
       {toast ? <p className="product-toast">{toast}</p> : null}
       {previewIndex !== null ? (
         <ImagePreview
