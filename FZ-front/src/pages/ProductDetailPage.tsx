@@ -11,7 +11,7 @@ import type {
 import { shareProduct } from '../utils/productShare'
 
 function formatPrice(priceCents: number) {
-  return `￥${Math.round(priceCents / 100).toLocaleString('zh-CN')}`
+  return `￥${Math.round(priceCents / 100)}`
 }
 
 function isValidEmail(value: string) {

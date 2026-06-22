@@ -166,13 +166,11 @@ export function MerchantProfilePage() {
       <div className="profile-scroll">
         <button className="seller-card" type="button" onClick={() => navigate('/merchant/account')}>
           <span className="seller-avatar" aria-hidden="true">
-            <UserRound size={36} />
+            <img src="/avatars/user-merchant.png" alt="" />
           </span>
           <span className="seller-meta">
-            <strong>
-              {profile.email}
-              {isVip ? <em>VIP会员</em> : null}
-            </strong>
+            <strong>{profile.email}</strong>
+            {isVip ? <em>VIP会员</em> : null}
             <small>{expiresText}</small>
           </span>
           <ChevronRight size={24} />

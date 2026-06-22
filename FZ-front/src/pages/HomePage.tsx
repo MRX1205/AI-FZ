@@ -1,4 +1,4 @@
-import { Bot, Gem, SendHorizontal, Sparkles, UserRound } from 'lucide-react'
+import { Gem, SendHorizontal, Sparkles } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { API_BASE_URL, ApiError, apiAssetUrl, apiGet, apiPost } from '../api/client'
@@ -54,7 +54,7 @@ function getVisitorId() {
 }
 
 function formatPrice(priceCents: number) {
-  return `￥${Math.round(priceCents / 100).toLocaleString('zh-CN')}`
+  return `￥${Math.round(priceCents / 100)}`
 }
 
 function formatTime(value: string) {
@@ -72,6 +72,10 @@ function tempMessage(role: ChatMessage['role'], content: string): ChatMessage {
     content,
     createdAt: new Date().toISOString(),
   }
+}
+
+function isTemporaryMessage(message: ChatMessage) {
+  return message.id.startsWith('temp-')
 }
 
 function parseStreamEvent(rawEvent: string): StreamEvent | null {
@@ -283,14 +287,19 @@ export function HomePage() {
       }
     } catch (error) {
       setMessages((current) =>
-        current.map((message) =>
-          message.id === assistantPlaceholder.id
-            ? {
-                ...message,
-                content: error instanceof ApiError ? error.message : '匹配失败，请稍后再试。',
-              }
-            : message,
-        ),
+        current.map((message) => {
+          if (message.id === userPlaceholder.id) {
+            return { ...message, id: `local-${crypto.randomUUID()}` }
+          }
+          if (message.id === assistantPlaceholder.id) {
+            return {
+              ...message,
+              id: `local-${crypto.randomUUID()}`,
+              content: error instanceof ApiError ? error.message : '匹配失败，请稍后再试。',
+            }
+          }
+          return message
+        }),
       )
     } finally {
       setIsSending(false)
@@ -408,10 +417,12 @@ function WelcomeBlock({ onSuggestionClick }: { onSuggestionClick: (content: stri
 }
 
 function ChatMessageItem({ message }: { message: ChatMessage }) {
+  const isPending = isTemporaryMessage(message)
+
   if (message.role === 'user') {
     return (
-      <div className="chat-row user-row">
-        <div className="user-bubble">
+      <div className={`chat-row user-row${isPending ? ' is-entering' : ''}`}>
+        <div className={`user-bubble${isPending ? ' is-pending' : ''}`}>
           <p>{message.content}</p>
           <time>{formatTime(message.createdAt)}</time>
         </div>
@@ -421,11 +432,11 @@ function ChatMessageItem({ message }: { message: ChatMessage }) {
   }
 
   return (
-    <div className="assistant-message-group">
-      <div className="chat-row assistant-row">
+    <div className={`assistant-message-group${isPending ? ' is-entering' : ''}`}>
+      <div className={`chat-row assistant-row${isPending ? ' is-entering' : ''}`}>
         <AssistantAvatar />
-        <div className="assistant-bubble">
-          <p>{message.content}</p>
+        <div className={`assistant-bubble${isPending && !message.content ? ' is-thinking' : ''}`}>
+          {message.content ? <p>{message.content}</p> : <TypingDots />}
           <time>{formatTime(message.createdAt)}</time>
         </div>
       </div>
@@ -433,6 +444,16 @@ function ChatMessageItem({ message }: { message: ChatMessage }) {
         <ProductMatches products={message.matchedProducts} createdAt={message.createdAt} />
       ) : null}
     </div>
+  )
+}
+
+function TypingDots() {
+  return (
+    <span className="typing-dots" aria-label="AI正在匹配中">
+      <i />
+      <i />
+      <i />
+    </span>
   )
 }
 
@@ -474,17 +495,9 @@ function ProductMatches({ products, createdAt }: { products: ProductCard[]; crea
 }
 
 function AssistantAvatar() {
-  return (
-    <span className="avatar assistant-avatar" aria-hidden="true">
-      <Bot size={28} strokeWidth={2.2} />
-    </span>
-  )
+  return <span className="avatar assistant-avatar" aria-hidden="true" />
 }
 
 function UserAvatar() {
-  return (
-    <span className="avatar user-avatar" aria-hidden="true">
-      <UserRound size={24} strokeWidth={2.4} />
-    </span>
-  )
+  return <span className="avatar user-avatar" aria-hidden="true" />
 }

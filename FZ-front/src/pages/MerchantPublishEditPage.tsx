@@ -205,15 +205,21 @@ export function MerchantPublishEditPage() {
 
             <section className="product-edit-form publish-form">
               <label>
-                商品标题 <small>（10字以内）</small>
+                <span className="product-edit-field-title">
+                  商品标题 <small>（10字以内）</small>
+                </span>
                 <input value={title} maxLength={10} onChange={(event) => setTitle(event.target.value)} />
               </label>
               <label>
-                商品简介 <small>（50字以内）</small>
+                <span className="product-edit-field-title">
+                  商品简介 <small>（50字以内）</small>
+                </span>
                 <input value={summary} maxLength={50} onChange={(event) => setSummary(event.target.value)} />
               </label>
               <label>
-                详情 <small>（300字以内）</small>
+                <span className="product-edit-field-title">
+                  详情 <small>（300字以内）</small>
+                </span>
                 <textarea value={detail} maxLength={300} onChange={(event) => setDetail(event.target.value)} />
               </label>
 

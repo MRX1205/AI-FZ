@@ -96,14 +96,16 @@ export function MerchantPublishResultPage() {
           <ChevronLeft size={31} strokeWidth={2.4} />
         </button>
         <h1>AI智能生成结果</h1>
-        <button
-          className="publish-result-regenerate"
-          type="button"
-          disabled={!product || isGenerating}
-          onClick={() => void handleRegenerate()}
-        >
-          {isGenerating ? '生成中...' : '重新生成'}
-        </button>
+        <span>
+          <button
+            className="publish-result-regenerate"
+            type="button"
+            disabled={!product || isGenerating}
+            onClick={() => void handleRegenerate()}
+          >
+            {isGenerating ? '生成中...' : '重新生成'}
+          </button>
+        </span>
       </header>
 
       {loadError ? (
@@ -212,7 +214,7 @@ function ResultField({
 }) {
   return (
     <div className="publish-result-field">
-      <strong>
+      <strong className="publish-result-field-title">
         {label} <small>{hint}</small>
       </strong>
       <p className={multiline ? 'is-multiline' : ''}>{value || '待补充'}</p>

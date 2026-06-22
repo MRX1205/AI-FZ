@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, Check, ChevronLeft } from 'lucide-react'
+import { Check, ChevronLeft } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiGet, apiPost } from '../api/client'
@@ -115,8 +115,8 @@ export function MerchantAccountPage() {
 
       <div className="account-scroll">
         <section className={`membership-card ${isVip ? 'is-vip' : 'is-free'}`}>
-          <span className="membership-icon" aria-hidden="true">
-            <BriefcaseBusiness size={27} />
+          <span className={`membership-icon membership-avatar ${isVip ? 'is-vip' : 'is-merchant'}`} aria-hidden="true">
+            <img src={isVip ? '/avatars/merchant-vip.png' : '/avatars/user-merchant.png'} alt="" />
           </span>
           <div>
             <h2>{isVip ? 'VIP会员' : '普通会员'}</h2>

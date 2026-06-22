@@ -276,7 +276,12 @@ export function MerchantPublishPage() {
                 ) : null}
                 {index === 1 ? (
                   <div className="publish-step-action is-column">
-                    <button type="button" disabled={!canGenerate} onClick={() => void handleGenerate()}>
+                    <button
+                      className={isGenerating ? 'publish-generate-button is-generating' : 'publish-generate-button'}
+                      type="button"
+                      disabled={!canGenerate}
+                      onClick={() => void handleGenerate()}
+                    >
                       <Loader2
                         className={isGenerating ? 'is-spinning publish-generate-spinner' : 'publish-generate-spinner'}
                         size={16}

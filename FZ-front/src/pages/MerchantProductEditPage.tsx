@@ -15,6 +15,10 @@ function yuanFromCents(cents: number) {
   return String(Math.round(cents / 100))
 }
 
+function formatSharePrice(cents: number) {
+  return `￥${Math.round(cents / 100)}`
+}
+
 function centsFromYuan(value: string) {
   const numeric = Number(value.replace(/[^\d.]/g, ''))
   if (!Number.isFinite(numeric) || numeric <= 0) return 0
@@ -172,7 +176,25 @@ export function MerchantProductEditPage() {
   async function handleShare() {
     if (!product) return
     if (product.status !== 'listed') {
-      setMessage('商品上架后可分享')
+      const draftShareText = `[商品草稿] ${product.title}｜${formatSharePrice(product.priceCents)}\n${product.summary}`
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(draftShareText)
+        } else {
+          const textarea = document.createElement('textarea')
+          textarea.value = draftShareText
+          textarea.setAttribute('readonly', 'true')
+          textarea.style.position = 'fixed'
+          textarea.style.opacity = '0'
+          document.body.appendChild(textarea)
+          textarea.select()
+          document.execCommand('copy')
+          document.body.removeChild(textarea)
+        }
+        setMessage('草稿内容已复制，上架后可分享商品链接')
+      } catch {
+        setMessage('分享失败，请稍后再试')
+      }
       return
     }
     try {
@@ -301,15 +323,21 @@ export function MerchantProductEditPage() {
 
             <section className="product-edit-form">
               <label>
-                商品标题 <small>（10字以内）</small>
+                <span className="product-edit-field-title">
+                  商品标题 <small>（10字以内）</small>
+                </span>
                 <input value={title} maxLength={10} onChange={(event) => setTitle(event.target.value)} />
               </label>
               <label>
-                商品简介 <small>（50字以内）</small>
+                <span className="product-edit-field-title">
+                  商品简介 <small>（50字以内）</small>
+                </span>
                 <input value={summary} maxLength={50} onChange={(event) => setSummary(event.target.value)} />
               </label>
               <label>
-                商品详情 <small>（300字以内）</small>
+                <span className="product-edit-field-title">
+                  商品详情 <small>（300字以内）</small>
+                </span>
                 <textarea value={detail} maxLength={300} onChange={(event) => setDetail(event.target.value)} />
               </label>
               <div className="publish-tag-section">
@@ -346,7 +374,9 @@ export function MerchantProductEditPage() {
                 </div>
               </div>
               <label>
-                预估售价 <small>（元）</small>
+                <span className="product-edit-field-title">
+                  预估售价 <small>（元）</small>
+                </span>
                 <input inputMode="decimal" value={price} onChange={(event) => setPrice(event.target.value)} />
               </label>
             </section>

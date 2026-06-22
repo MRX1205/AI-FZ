@@ -1,4 +1,4 @@
-import { ChevronLeft, Crown, Gem, Mail, Package } from 'lucide-react'
+import { ChevronLeft, Gem, Mail, Package } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError, apiGet } from '../api/client'
@@ -75,8 +75,8 @@ export function MerchantAccountBenefitsPage() {
 
       <div className="account-scroll">
         <section className="membership-card is-vip">
-          <span className="membership-icon" aria-hidden="true">
-            <Crown size={27} />
+          <span className="membership-icon membership-avatar is-vip" aria-hidden="true">
+            <img src="/avatars/merchant-vip.png" alt="" />
           </span>
           <div>
             <h2>VIP会员</h2>
